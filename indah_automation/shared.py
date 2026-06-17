@@ -572,6 +572,13 @@ def response_status(item: Dict[str, Any]) -> str:
     return str(status) if status is not None else ""
 
 
+def direct_submit_status(current_status: Any = None) -> str:
+    status = clean(current_status)
+    if not status or status == "DRAFT":
+        return "SUBMITTED"
+    return "REVISED"
+
+
 def is_error_result(item: Dict[str, Any]) -> bool:
     status = item.get("status")
     return isinstance(status, int) and status >= 400
@@ -968,7 +975,15 @@ def build_wilayah(rows: Sequence[Dict[str, str]]) -> List[Dict[str, Optional[str
     ]
 
 
-def build_kegiatan_payload(row: Dict[str, str], child_variabel: Sequence[Dict[str, str]], child_wilayah: Sequence[Dict[str, str]], auth: SessionAuth, produsen_data: Dict[str, Any]) -> Dict[str, Any]:
+def build_kegiatan_payload(
+    row: Dict[str, str],
+    child_variabel: Sequence[Dict[str, str]],
+    child_wilayah: Sequence[Dict[str, str]],
+    auth: SessionAuth,
+    produsen_data: Dict[str, Any],
+    *,
+    status: str = "DRAFT",
+) -> Dict[str, Any]:
     data = build_kegiatan_data(row, child_variabel, child_wilayah)
     details = produsen_data.get("details") or {}
     address = data["blok_i"]["alamat_instansi_penyelenggara"]
@@ -987,7 +1002,7 @@ def build_kegiatan_payload(row: Dict[str, str], child_variabel: Sequence[Dict[st
         "submission_period": as_int(pick(row, "submission_period")) or now_year(),
         "data": data,
         "reviews": None,
-        "status": "DRAFT",
+        "status": status,
         "rejection_note": None,
         "submitter": auth.user_payload,
         "produsen_data": payload_produsen_data,
@@ -1003,7 +1018,14 @@ def build_value_domain(rows: Sequence[Dict[str, str]]) -> List[Dict[str, Optiona
     return [{"kode": pick(row, "value_domain_kode"), "nilai": pick(row, "value_domain_nilai")} for row in rows]
 
 
-def build_variabel_payload(row: Dict[str, str], value_domain_rows: Sequence[Dict[str, str]], ms_keg: Dict[str, Any], auth: SessionAuth) -> Dict[str, Any]:
+def build_variabel_payload(
+    row: Dict[str, str],
+    value_domain_rows: Sequence[Dict[str, str]],
+    ms_keg: Dict[str, Any],
+    auth: SessionAuth,
+    *,
+    status: str = "DRAFT",
+) -> Dict[str, Any]:
     parent = parent_refs_from_ms_keg(ms_keg, auth.user_payload)
     data = {
         "nama": pick(row, "nama", "variabel_nama"),
@@ -1027,7 +1049,7 @@ def build_variabel_payload(row: Dict[str, str], value_domain_rows: Sequence[Dict
         "data": data,
         "reviews": [],
         "changes": [],
-        "status": "DRAFT",
+        "status": status,
         "rejection_note": None,
         "submitter": parent["submitter"],
         "produsen_data": parent["produsen_data"],
@@ -1042,6 +1064,8 @@ def build_indikator_payload(
     variabel_pembangun_rows: Sequence[Dict[str, str]],
     ms_keg: Dict[str, Any],
     auth: SessionAuth,
+    *,
+    status: str = "DRAFT",
 ) -> Dict[str, Any]:
     parent = parent_refs_from_ms_keg(ms_keg, auth.user_payload)
     is_komposit = bool_or_false(pick(row, "indikator_komposit", default="FALSE"))
@@ -1071,7 +1095,7 @@ def build_indikator_payload(
         "data": data,
         "reviews": [],
         "changes": [],
-        "status": "DRAFT",
+        "status": status,
         "rejection_note": None,
         "submitter": parent["submitter"],
         "produsen_data": parent["produsen_data"],

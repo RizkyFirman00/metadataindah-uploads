@@ -2,6 +2,10 @@
 
 Automation tersedia lewat UI lokal dan script phase terpisah.
 
+## Login Manual
+
+scp ".indah_session/storage_state.json" user@homeserver:/path/ke/metadataindah-uploads/.indah_session/storage_state.json
+
 ## UI Lokal
 
 Jalankan:
@@ -90,6 +94,12 @@ Submit kegiatan:
 ../venv/bin/python indah_kegiatan.py --folder "dispora" --submit
 ```
 
+Submit langsung kegiatan:
+
+```bash
+../venv/bin/python indah_kegiatan.py --folder "dispora" --submit --final-submit
+```
+
 Submit variabel:
 
 ```bash
@@ -115,7 +125,8 @@ Map ini dipakai agar phase variabel/indikator tahu `ms_keg_id` dari kegiatan yan
 ## Catatan
 
 - Tanpa `--submit`, script hanya validasi/dry-run dan tidak mengirim data.
-- Dengan `--submit`, script melakukan POST ke API INDAH menggunakan token dari hasil login manual.
+- Dengan `--submit`, script melakukan POST/PUT simpan draft ke API INDAH menggunakan token dari hasil login manual.
+- Dengan `--submit --final-submit`, script mengirim status `SUBMITTED` untuk item draft baru dan `REVISED` untuk item lama yang sudah bukan draft.
 - CSV boleh berada di subfolder, misalnya `Kegiatan`, `Variabel`, atau `Indikator`; script mencari file secara rekursif berdasarkan nama seperti `ms_kegiatan.csv`.
 - UI akan mengonversi input `.xlsx`/`.xlsm` menjadi CSV sementara di folder `ui_uploads/`.
 - Kolom `rumus` pada `ms_indikator` dikirim sebagai formula LaTeX. Contoh aman: `\sum X / n`, `\frac{Jumlah}{Total}\times100\%`, `\phi`, `\le`. Simbol umum seperti `Σ`, `φ`, `×`, `≤`, `≥`, `√` akan dikonversi otomatis. Jika simbol berubah menjadi `?`, file CSV sudah kehilangan encoding; upload `.xlsx` atau simpan CSV sebagai UTF-8.

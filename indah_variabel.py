@@ -9,6 +9,7 @@ from indah_automation.shared import (
     PROJECT_ROOT,
     append_or_replace_map,
     build_variabel_payload,
+    direct_submit_status,
     draft_name_errors,
     extract_created_id,
     find_csv,
@@ -30,12 +31,15 @@ def main() -> None:
     parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Storage state hasil indah_login.py.")
     parser.add_argument("--run-state", default=str(DEFAULT_RUN_STATE_DIR), help="Folder mapping kegiatan/variabel.")
     parser.add_argument("--submit", action="store_true", help="Benar-benar POST simpan sementara ke INDAH.")
+    parser.add_argument("--final-submit", action="store_true", help="POST/PUT ke INDAH dengan status SUBMITTED/REVISED.")
     parser.add_argument("--limit", type=int, default=0, help="Batasi jumlah row untuk test.")
     parser.add_argument("--only-title", help="Proses hanya judul kegiatan tertentu.")
     parser.add_argument("--verbose", action="store_true", help="Print payload saat dry-run.")
     parser.add_argument("--no-auto-resolve-kegiatan", action="store_true", help="Matikan pencarian otomatis MS-Kegiatan dari judul.")
     parser.add_argument("--auto-resolve-max-pages", type=int, default=2, help="Batas halaman scan saat auto-resolve kegiatan.")
     args = parser.parse_args()
+    if args.final_submit:
+        args.submit = True
 
     folder = Path(args.folder)
     variabel_path = find_csv(folder, "ms_variabel", required=True)
@@ -153,23 +157,26 @@ def main() -> None:
                 "status": ms_keg.get("status") or "",
             }
         )
-        payload = build_variabel_payload(row, child_rows, ms_keg, auth)
+        existing_ms_var_id = pick(existing_variabel_map.get((title, name), {}), "ms_var_id")
+        existing_status = pick(existing_variabel_map.get((title, name), {}), "status")
+        target_status = direct_submit_status(existing_status) if args.final_submit else "DRAFT"
+        payload = build_variabel_payload(row, child_rows, ms_keg, auth, status=target_status)
         if args.verbose:
             print_dry_run_payload("variabel-payload", payload, True)
-        existing_ms_var_id = pick(existing_variabel_map.get((title, name), {}), "ms_var_id")
         if existing_ms_var_id:
             result = client.update_variabel(existing_ms_var_id, payload)
             if is_error_result(result):
                 print(f"[error] {title} / {name}: {result}")
                 continue
             ms_var_id = existing_ms_var_id
-            print(f"[ok] variabel diperbarui: {title} / {name} -> {ms_var_id}")
+            action = "disubmit ulang" if target_status == "REVISED" else "disubmit" if args.final_submit else "diperbarui"
+            print(f"[ok] variabel {action}: {title} / {name} -> {ms_var_id}")
             map_rows.append(
                 {
                     "judul_kegiatan": title,
                     "nama_variabel": name,
                     "ms_var_id": ms_var_id,
-                    "status": "DRAFT",
+                    "status": response_status(result) or target_status,
                 }
             )
             continue
@@ -182,13 +189,14 @@ def main() -> None:
         if not ms_var_id:
             print(f"[error] {title} / {name}: API tidak mengembalikan id variabel. Respons: {result}")
             continue
-        print(f"[ok] variabel tersimpan: {title} / {name} -> {ms_var_id}")
+        action = "tersubmit" if args.final_submit else "tersimpan"
+        print(f"[ok] variabel {action}: {title} / {name} -> {ms_var_id}")
         map_rows.append(
             {
                 "judul_kegiatan": title,
                 "nama_variabel": name,
                 "ms_var_id": ms_var_id,
-                "status": response_status(result) or "DRAFT",
+                "status": response_status(result) or target_status,
             }
         )
 

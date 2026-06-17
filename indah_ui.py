@@ -562,8 +562,8 @@ def render_phase_form(phase: str, config: Dict[str, object]) -> str:
         <input type="checkbox" name="verbose" value="1">
         <span>Verbose</span>
       </label>
-      <button class="secondary" type="submit" data-loading-label="Memvalidasi {escape(str(config["title"]))}">Validasi saja</button>
-      <button type="submit" name="submit" value="1" data-loading-label="Menyimpan draft {escape(str(config["title"]))}">Simpan draft</button>
+      <button class="secondary" type="submit" name="submit" value="1" data-loading-label="Menyimpan draft {escape(str(config["title"]))}">Simpan Draft</button>
+      <button type="submit" name="final_submit" value="1" data-loading-label="Submit langsung {escape(str(config["title"]))}" data-confirm="Submit langsung ke INDAH? Pastikan isian sudah benar karena status akan dikirim sebagai SUBMITTED/REVISED.">Submit Langsung</button>
     </div>
   </form>
 </section>
@@ -775,8 +775,10 @@ def build_phase_command(phase: str, config: Dict[str, object], prepared_dir: Pat
         command.extend(["--limit", limit])
     if form.getfirst("verbose"):
         command.append("--verbose")
-    if form.getfirst("submit"):
+    if form.getfirst("submit") or form.getfirst("final_submit"):
         command.append("--submit")
+    if form.getfirst("final_submit"):
+        command.append("--final-submit")
     return command
 
 

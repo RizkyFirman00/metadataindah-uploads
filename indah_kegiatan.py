@@ -30,10 +30,13 @@ def main() -> None:
     parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Storage state hasil indah_login.py.")
     parser.add_argument("--run-state", default=str(DEFAULT_RUN_STATE_DIR), help="Folder output mapping.")
     parser.add_argument("--submit", action="store_true", help="Benar-benar POST simpan sementara ke INDAH.")
+    parser.add_argument("--final-submit", action="store_true", help="POST ke INDAH dengan status SUBMITTED.")
     parser.add_argument("--limit", type=int, default=0, help="Batasi jumlah row untuk test.")
     parser.add_argument("--only-title", help="Proses hanya judul kegiatan tertentu.")
     parser.add_argument("--verbose", action="store_true", help="Print payload saat dry-run.")
     args = parser.parse_args()
+    if args.final_submit:
+        args.submit = True
 
     folder = Path(args.folder)
     kegiatan_path = find_csv(folder, "ms_kegiatan", required=True)
@@ -63,10 +66,24 @@ def main() -> None:
             continue
         assert auth is not None or not args.submit
         produsen = resolve_produsen_data(row, auth, client) if auth else {"name": pick(row, "produsen_data_name"), "id": pick(row, "produsen_data_id")}
-        payload = build_kegiatan_payload(row, rows_for_title(child_variabel_rows, title), rows_for_title(child_wilayah_rows, title), auth, produsen) if auth else None
+        target_status = "SUBMITTED" if args.final_submit else "DRAFT"
+        payload = build_kegiatan_payload(
+            row,
+            rows_for_title(child_variabel_rows, title),
+            rows_for_title(child_wilayah_rows, title),
+            auth,
+            produsen,
+            status=target_status,
+        ) if auth else None
         if not args.submit:
             dummy_auth = SessionAuth(token="", user_raw={}, user_payload={"username": None, "name": None, "email": None, "organization": {}})
-            payload = build_kegiatan_payload(row, rows_for_title(child_variabel_rows, title), rows_for_title(child_wilayah_rows, title), dummy_auth, produsen)
+            payload = build_kegiatan_payload(
+                row,
+                rows_for_title(child_variabel_rows, title),
+                rows_for_title(child_wilayah_rows, title),
+                dummy_auth,
+                produsen,
+            )
             print_dry_run_payload("kegiatan", payload, args.verbose)
             continue
 
@@ -78,13 +95,14 @@ def main() -> None:
         if not ms_keg_id:
             print(f"[error] {title}: API tidak mengembalikan id kegiatan. Respons: {result}")
             continue
-        print(f"[ok] kegiatan tersimpan: {title} -> {ms_keg_id}")
+        action = "tersubmit" if args.final_submit else "tersimpan"
+        print(f"[ok] kegiatan {action}: {title} -> {ms_keg_id}")
         map_rows.append(
             {
                 "judul_kegiatan": title,
                 "ms_keg_id": ms_keg_id,
                 "detail_url": f"https://indah.bps.go.id/metadata/view-kegiatan/{ms_keg_id}",
-                "status": response_status(result) or "DRAFT",
+                "status": response_status(result) or target_status,
             }
         )
 

@@ -9,6 +9,7 @@ from indah_automation.shared import (
     PROJECT_ROOT,
     append_or_replace_map,
     build_indikator_payload,
+    direct_submit_status,
     draft_name_errors,
     extract_created_id,
     find_csv,
@@ -30,12 +31,15 @@ def main() -> None:
     parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Storage state hasil indah_login.py.")
     parser.add_argument("--run-state", default=str(DEFAULT_RUN_STATE_DIR), help="Folder mapping kegiatan/indikator.")
     parser.add_argument("--submit", action="store_true", help="Benar-benar POST simpan sementara ke INDAH.")
+    parser.add_argument("--final-submit", action="store_true", help="POST/PUT ke INDAH dengan status SUBMITTED/REVISED.")
     parser.add_argument("--limit", type=int, default=0, help="Batasi jumlah row untuk test.")
     parser.add_argument("--only-title", help="Proses hanya judul kegiatan tertentu.")
     parser.add_argument("--verbose", action="store_true", help="Print payload saat dry-run.")
     parser.add_argument("--no-auto-resolve-kegiatan", action="store_true", help="Matikan pencarian otomatis MS-Kegiatan dari judul.")
     parser.add_argument("--auto-resolve-max-pages", type=int, default=2, help="Batas halaman scan saat auto-resolve kegiatan.")
     args = parser.parse_args()
+    if args.final_submit:
+        args.submit = True
 
     folder = Path(args.folder)
     indikator_path = find_csv(folder, "ms_indikator", required=True)
@@ -155,29 +159,33 @@ def main() -> None:
                 "status": ms_keg.get("status") or "",
             }
         )
+        existing_ms_ind_id = pick(existing_indikator_map.get((title, name), {}), "ms_ind_id")
+        existing_status = pick(existing_indikator_map.get((title, name), {}), "status")
+        target_status = direct_submit_status(existing_status) if args.final_submit else "DRAFT"
         payload = build_indikator_payload(
             row,
             rows_for_indikator(indikator_pembangun_rows, title, name),
             rows_for_indikator(variabel_pembangun_rows, title, name),
             ms_keg,
             auth,
+            status=target_status,
         )
         if args.verbose:
             print_dry_run_payload("indikator-payload", payload, True)
-        existing_ms_ind_id = pick(existing_indikator_map.get((title, name), {}), "ms_ind_id")
         if existing_ms_ind_id:
             result = client.update_indikator(existing_ms_ind_id, payload)
             if is_error_result(result):
                 print(f"[error] {title} / {name}: {result}")
                 continue
             ms_ind_id = existing_ms_ind_id
-            print(f"[ok] indikator diperbarui: {title} / {name} -> {ms_ind_id}")
+            action = "disubmit ulang" if target_status == "REVISED" else "disubmit" if args.final_submit else "diperbarui"
+            print(f"[ok] indikator {action}: {title} / {name} -> {ms_ind_id}")
             map_rows.append(
                 {
                     "judul_kegiatan": title,
                     "nama_indikator": name,
                     "ms_ind_id": ms_ind_id,
-                    "status": "DRAFT",
+                    "status": response_status(result) or target_status,
                 }
             )
             continue
@@ -190,13 +198,14 @@ def main() -> None:
         if not ms_ind_id:
             print(f"[error] {title} / {name}: API tidak mengembalikan id indikator. Respons: {result}")
             continue
-        print(f"[ok] indikator tersimpan: {title} / {name} -> {ms_ind_id}")
+        action = "tersubmit" if args.final_submit else "tersimpan"
+        print(f"[ok] indikator {action}: {title} / {name} -> {ms_ind_id}")
         map_rows.append(
             {
                 "judul_kegiatan": title,
                 "nama_indikator": name,
                 "ms_ind_id": ms_ind_id,
-                "status": response_status(result) or "DRAFT",
+                "status": response_status(result) or target_status,
             }
         )
 
