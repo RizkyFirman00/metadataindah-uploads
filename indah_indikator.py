@@ -57,9 +57,14 @@ def main() -> None:
     kegiatan_map_path = Path(args.run_state) / "kegiatan_map.csv"
     kegiatan_map = map_rows_by_title(kegiatan_map_path)
     indikator_map_path = Path(args.run_state) / "indikator_map.csv"
-    existing_indikator_map = {
-        (pick(row, "judul_kegiatan") or "", pick(row, "nama_indikator") or ""): row
-        for row in read_csv_rows(indikator_map_path)
+    existing_indikator_rows = read_csv_rows(indikator_map_path)
+    existing_indikator_by_parent = {
+        (
+            pick(row, "judul_kegiatan") or "",
+            pick(row, "nama_indikator") or "",
+            pick(row, "ms_keg_id") or "",
+        ): row
+        for row in existing_indikator_rows
     }
     print(f"CSV indikator: {indikator_path}")
     print(f"Rows indikator: {len(indikator_rows)}")
@@ -159,8 +164,10 @@ def main() -> None:
                 "status": ms_keg.get("status") or "",
             }
         )
-        existing_ms_ind_id = pick(existing_indikator_map.get((title, name), {}), "ms_ind_id")
-        existing_status = pick(existing_indikator_map.get((title, name), {}), "status")
+        current_parent_id = str(ms_keg_id)
+        existing_indikator_row = existing_indikator_by_parent.get((title, name, current_parent_id), {})
+        existing_ms_ind_id = pick(existing_indikator_row, "ms_ind_id")
+        existing_status = pick(existing_indikator_row, "status")
         target_status = direct_submit_status(existing_status) if args.final_submit else "DRAFT"
         payload = build_indikator_payload(
             row,
@@ -183,6 +190,7 @@ def main() -> None:
             map_rows.append(
                 {
                     "judul_kegiatan": title,
+                    "ms_keg_id": ms_keg_id,
                     "nama_indikator": name,
                     "ms_ind_id": ms_ind_id,
                     "status": response_status(result) or target_status,
@@ -203,6 +211,7 @@ def main() -> None:
         map_rows.append(
             {
                 "judul_kegiatan": title,
+                "ms_keg_id": ms_keg_id,
                 "nama_indikator": name,
                 "ms_ind_id": ms_ind_id,
                 "status": response_status(result) or target_status,
@@ -222,8 +231,8 @@ def main() -> None:
         run_state = Path(args.run_state)
         append_or_replace_map(
             run_state / "indikator_map.csv",
-            ["judul_kegiatan", "nama_indikator", "ms_ind_id", "status"],
-            ["judul_kegiatan", "nama_indikator"],
+            ["judul_kegiatan", "ms_keg_id", "nama_indikator", "ms_ind_id", "status"],
+            ["judul_kegiatan", "ms_keg_id", "nama_indikator"],
             map_rows,
         )
         print(f"Map ditulis: {run_state / 'indikator_map.csv'}")

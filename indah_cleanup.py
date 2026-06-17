@@ -20,13 +20,13 @@ MAP_CONFIG = {
         "path": "variabel_map.csv",
         "id_field": "ms_var_id",
         "label_field": "nama_variabel",
-        "fieldnames": ["judul_kegiatan", "nama_variabel", "ms_var_id", "status"],
+        "fieldnames": ["judul_kegiatan", "ms_keg_id", "nama_variabel", "ms_var_id", "status"],
     },
     "indikator": {
         "path": "indikator_map.csv",
         "id_field": "ms_ind_id",
         "label_field": "nama_indikator",
-        "fieldnames": ["judul_kegiatan", "nama_indikator", "ms_ind_id", "status"],
+        "fieldnames": ["judul_kegiatan", "ms_keg_id", "nama_indikator", "ms_ind_id", "status"],
     },
 }
 
