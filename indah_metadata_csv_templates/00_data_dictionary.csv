@@ -130,7 +130,7 @@ ms_indikator,definisi,Definisi Indikator,tidak,ya,Default "-" bila kosong
 ms_indikator,konsep,Konsep,tidak,ya,Bisa berulang; pisahkan dengan |; default "-"
 ms_indikator,interpretasi,Interpretasi,tidak,ya,Default "-" bila kosong
 ms_indikator,metode_perhitungan,Metode Perhitungan,tidak,ya,Default "-" bila kosong
-ms_indikator,rumus,Rumus,tidak,ya,Field formula/math; default "-"
+ms_indikator,rumus,Rumus,tidak,ya,Field formula/math; pakai LaTeX seperti \sum X / n atau \frac{a}{b}; simbol umum seperti Σ φ × ≤ akan dikonversi otomatis; default "-"
 ms_indikator,ukuran,Ukuran,tidak,tidak,Default "-" bila kosong
 ms_indikator,satuan,Satuan,tidak,kondisional,Wajib bila ukuran terisi; default "-"
 ms_indikator,klasifikasi_penyajian,Klasifikasi Penyajian,tidak,ya,Bisa berulang; pisahkan dengan |; default Wilayah

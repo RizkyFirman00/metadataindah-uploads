@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.py[cod]
+.DS_Store
+
+.indah_session/
+run_state/
+ui_runs/
+ui_uploads/
+
+*.log
+*.tmp

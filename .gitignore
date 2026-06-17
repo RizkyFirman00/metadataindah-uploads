@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+.env
+
+.indah_session/
+run_state/
+ui_runs/
+ui_uploads/
+
+*.log
+*.tmp

@@ -80,6 +80,9 @@ def main() -> None:
         title = pick(row, "judul_kegiatan") or ""
         name = pick(row, "nama", "indikator_nama") or f"row-{index}"
         errors = draft_name_errors(row, "nama", "indikator_nama")
+        raw_formula = pick(row, "rumus")
+        if raw_formula and "?" in raw_formula:
+            print(f"[warn] {title} / {name}: kolom rumus berisi '?'. Jika ini asalnya simbol matematika, simpan file sebagai UTF-8 CSV atau pakai XLSX.")
         if title in ms_keg_cache:
             ms_keg_id, ms_keg_item, ms_keg_source = ms_keg_cache[title]
         else:

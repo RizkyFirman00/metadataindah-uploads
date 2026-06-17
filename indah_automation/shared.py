@@ -160,6 +160,112 @@ def list_dicts_from_names(value: Any, *, source: Optional[str] = None, default_n
     return [{"nama": name, "sumber": source or "input-manual"} for name in names]
 
 
+FORMULA_SYMBOLS = {
+    "∑": r"\sum ",
+    "Σ": r"\sum ",
+    "σ": r"\sigma ",
+    "Φ": r"\Phi ",
+    "φ": r"\phi ",
+    "ϕ": r"\varphi ",
+    "π": r"\pi ",
+    "Π": r"\Pi ",
+    "θ": r"\theta ",
+    "Θ": r"\Theta ",
+    "α": r"\alpha ",
+    "β": r"\beta ",
+    "γ": r"\gamma ",
+    "δ": r"\delta ",
+    "Δ": r"\Delta ",
+    "λ": r"\lambda ",
+    "μ": r"\mu ",
+    "Ω": r"\Omega ",
+    "ω": r"\omega ",
+    "×": r"\times ",
+    "÷": r"\div ",
+    "−": "-",
+    "±": r"\pm ",
+    "≤": r"\le ",
+    "≥": r"\ge ",
+    "≠": r"\ne ",
+    "≈": r"\approx ",
+    "∞": r"\infty ",
+    "√": r"\sqrt{}",
+    "∫": r"\int ",
+    "∂": r"\partial ",
+    "∈": r"\in ",
+    "∉": r"\notin ",
+    "∩": r"\cap ",
+    "∪": r"\cup ",
+    "→": r"\to ",
+    "←": r"\leftarrow ",
+}
+
+SUPERSCRIPT_SYMBOLS = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+    "ⁱ": "i",
+    "ⁿ": "n",
+}
+
+SUBSCRIPT_SYMBOLS = {
+    "₀": "0",
+    "₁": "1",
+    "₂": "2",
+    "₃": "3",
+    "₄": "4",
+    "₅": "5",
+    "₆": "6",
+    "₇": "7",
+    "₈": "8",
+    "₉": "9",
+    "ᵢ": "i",
+    "ⱼ": "j",
+    "ₖ": "k",
+    "ₗ": "l",
+    "ₘ": "m",
+    "ₙ": "n",
+    "ₚ": "p",
+    "ₛ": "s",
+    "ₜ": "t",
+    "ₓ": "x",
+}
+
+
+def normalize_formula(value: Any, default: str = "-") -> str:
+    text = clean(value)
+    if text is None:
+        return default
+    output: List[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char in SUPERSCRIPT_SYMBOLS:
+            digits = []
+            while index < len(text) and text[index] in SUPERSCRIPT_SYMBOLS:
+                digits.append(SUPERSCRIPT_SYMBOLS[text[index]])
+                index += 1
+            output.append("^{" + "".join(digits) + "}")
+            continue
+        if char in SUBSCRIPT_SYMBOLS:
+            digits = []
+            while index < len(text) and text[index] in SUBSCRIPT_SYMBOLS:
+                digits.append(SUBSCRIPT_SYMBOLS[text[index]])
+                index += 1
+            output.append("_{" + "".join(digits) + "}")
+            continue
+        output.append(FORMULA_SYMBOLS.get(char, char))
+        index += 1
+    return re.sub(r" {2,}", " ", "".join(output)).strip() or default
+
+
 def maybe_id(value: Any) -> Any:
     text = clean(value)
     if text is None:
@@ -945,7 +1051,7 @@ def build_indikator_payload(
         "konsep": list_or_default(pick(row, "konsep"), "-"),
         "interpretasi": pick(row, "interpretasi", default="-"),
         "metode_perhitungan": pick(row, "metode_perhitungan", default="-"),
-        "rumus": pick(row, "rumus", default="-"),
+        "rumus": normalize_formula(pick(row, "rumus"), default="-"),
         "ukuran": pick(row, "ukuran", default="-"),
         "satuan": pick(row, "satuan", default="-"),
         "variabel_disaggregasi": list_dicts_from_names(

@@ -118,3 +118,4 @@ Map ini dipakai agar phase variabel/indikator tahu `ms_keg_id` dari kegiatan yan
 - Dengan `--submit`, script melakukan POST ke API INDAH menggunakan token dari hasil login manual.
 - CSV boleh berada di subfolder, misalnya `Kegiatan`, `Variabel`, atau `Indikator`; script mencari file secara rekursif berdasarkan nama seperti `ms_kegiatan.csv`.
 - UI akan mengonversi input `.xlsx`/`.xlsm` menjadi CSV sementara di folder `ui_uploads/`.
+- Kolom `rumus` pada `ms_indikator` dikirim sebagai formula LaTeX. Contoh aman: `\sum X / n`, `\frac{Jumlah}{Total}\times100\%`, `\phi`, `\le`. Simbol umum seperti `Σ`, `φ`, `×`, `≤`, `≥`, `√` akan dikonversi otomatis. Jika simbol berubah menjadi `?`, file CSV sudah kehilangan encoding; upload `.xlsx` atau simpan CSV sebagai UTF-8.
