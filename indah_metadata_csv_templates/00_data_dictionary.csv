@@ -1,0 +1,147 @@
+sheet,column_key,label_ui,wajib_draft,wajib_submit,catatan
+ms_kegiatan,jenis_statistik,Jenis metadata statistik,ya,ya,Isi STATISTIK_SEKTORAL
+ms_kegiatan,rekomendasi_dari_bps,Apakah mendapatkan rekomendasi kegiatan statistik dari BPS?,tidak,ya,TRUE/FALSE
+ms_kegiatan,identitas_rekomendasi,Identitas Rekomendasi,kondisional,kondisional,Wajib jika rekomendasi_dari_bps TRUE
+ms_kegiatan,judul_kegiatan,Judul Kegiatan,ya,ya,Dipakai untuk verifikasi item paling atas
+ms_kegiatan,tahun,Tahun,ya,ya,4 digit
+ms_kegiatan,cara_pengumpulan_data,Cara Pengumpulan Data,tidak,ya,"PENCACAHAN_LENGKAP; SURVEI; KOMPILASI_PRODUK_ADMINISTRASI; CARA_LAIN_SESUAI_DENGAN_PERKEMBANGAN_TI"
+ms_kegiatan,sektor_kegiatan,Sektor Kegiatan,tidak,ya,Lihat pilihan kode di markdown
+ms_kegiatan,produsen_data_id,Instansi Penyelenggara ID,ya,ya,Opsional jika nama unik
+ms_kegiatan,produsen_data_name,Instansi Penyelenggara,ya,ya,Automation akan search nama jika ID kosong
+ms_kegiatan,unit_eselon1,Eselon 1,tidak,ya,Teks
+ms_kegiatan,unit_eselon2,Eselon 2,tidak,ya,Teks
+ms_kegiatan,pj_teknis_nama,Nama penanggung jawab teknis,tidak,tidak,Teks
+ms_kegiatan,pj_teknis_jabatan,Jabatan penanggung jawab teknis,tidak,ya,Teks
+ms_kegiatan,pj_teknis_alamat,Alamat penanggung jawab teknis,tidak,ya,Teks
+ms_kegiatan,pj_teknis_telepon,Telepon penanggung jawab teknis,tidak,tidak,Numerik jika diisi
+ms_kegiatan,pj_teknis_faksimile,Faksmile penanggung jawab teknis,tidak,tidak,Teks
+ms_kegiatan,pj_teknis_email,Email penanggung jawab teknis,tidak,tidak,Format email jika diisi
+ms_kegiatan,latar_belakang_kegiatan,Latar Belakang Kegiatan,tidak,ya,Textarea
+ms_kegiatan,tujuan_kegiatan,Tujuan Kegiatan,tidak,ya,Textarea
+ms_kegiatan,jadwal_perencanaan_awal,Tanggal Mulai Perencanaan,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_perencanaan_akhir,Tanggal Selesai Perencanaan,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_desain_awal,Tanggal Mulai Desain,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_desain_akhir,Tanggal Selesai Desain,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_pengumpulan_awal,Tanggal Mulai Pengumpulan Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_pengumpulan_akhir,Tanggal Selesai Pengumpulan Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_pengolahan_awal,Tanggal Mulai Pengolahan Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_pengolahan_akhir,Tanggal Selesai Pengolahan Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_analisis_awal,Tanggal Mulai Analisis Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_analisis_akhir,Tanggal Selesai Analisis Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_diseminasi_awal,Tanggal Mulai Diseminasi Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_diseminasi_akhir,Tanggal Selesai Diseminasi Data,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_evaluasi_awal,Tanggal Mulai Evaluasi,tidak,ya,YYYY-MM-DD
+ms_kegiatan,jadwal_evaluasi_akhir,Tanggal Selesai Evaluasi,tidak,ya,YYYY-MM-DD
+ms_kegiatan,kegiatan_ini_dilakukan,Kegiatan Ini Dilakukan,tidak,ya,HANYA_SEKALI atau BERULANG
+ms_kegiatan,frekuensi_penyelenggaraan,Frekuensi Penyelenggaraan,tidak,kondisional,Wajib jika BERULANG
+ms_kegiatan,tipe_pengumpulan_data,Tipe Pengumpulan Data,tidak,ya,"LONGITUDINAL_PANEL; LONGITUDINAL_CROSS_SECTIONAL; CROSS_SECTIONAL"
+ms_kegiatan,cakupan_wilayah,Cakupan Wilayah Pengumpulan Data,tidak,ya,SELURUH_WILAYAH_INDONESIA atau SEBAGIAN_WILAYAH_INDONESIA
+ms_kegiatan,metode_wawancara,Wawancara,tidak,ya,TRUE/FALSE; minimal satu metode TRUE
+ms_kegiatan,metode_mengisi_sendiri,Mengisi Kuesioner Sendiri,tidak,ya,TRUE/FALSE
+ms_kegiatan,metode_pengamatan,Pengamatan,tidak,ya,TRUE/FALSE
+ms_kegiatan,metode_pengumpulan_sekunder,Pengumpulan Data Sekunder,tidak,ya,TRUE/FALSE
+ms_kegiatan,metode_lainnya,Metode Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,metode_lainnya_text,Metode Pengumpulan Data Lainnya,tidak,kondisional,Wajib jika metode_lainnya TRUE
+ms_kegiatan,sarana_papi,PAPI,tidak,ya,TRUE/FALSE; minimal satu sarana TRUE
+ms_kegiatan,sarana_capi,CAPI,tidak,ya,TRUE/FALSE
+ms_kegiatan,sarana_cati,CATI,tidak,ya,TRUE/FALSE
+ms_kegiatan,sarana_cawi,CAWI,tidak,ya,TRUE/FALSE
+ms_kegiatan,sarana_mail,Mail,tidak,ya,TRUE/FALSE
+ms_kegiatan,sarana_lainnya,Sarana Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,sarana_lainnya_text,Sarana Pengumpulan Lainnya,tidak,kondisional,Wajib jika sarana_lainnya TRUE
+ms_kegiatan,unit_individu,Unit Individu,tidak,ya,TRUE/FALSE; minimal satu unit TRUE
+ms_kegiatan,unit_rumah_tangga,Unit Rumah Tangga,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_usaha_perusahaan,Unit Usaha/Perusahaan,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_lainnya,Unit Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_lainnya_text,Unit Pengumpulan Data Lainnya,tidak,kondisional,Wajib jika unit_lainnya TRUE
+ms_kegiatan,jenis_rancangan_sampel,Jenis Rancangan Sampel,tidak,kondisional,Diisi jika cara_pengumpulan_data SURVEI
+ms_kegiatan,metode_pemilihan_sampel_tahap_terakhir,Metode Pemilihan Sampel Tahap Terakhir,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,metode_yang_digunakan,Metode Yang Digunakan,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,kerangka_sampel_tahap_terakhir,Kerangka Sampel Tahap Terakhir,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,fraksi_sampel_keseluruhan,Fraksi Sampel Keseluruhan,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,sampling_error_variabel_utama,Nilai Perkiraan Sampling Error Variabel Utama,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,unit_sampel,Unit Sampel,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,unit_observasi,Unit Observasi,tidak,kondisional,Diisi jika SURVEI
+ms_kegiatan,melakukan_uji_coba,Apakah Melakukan Uji Coba,tidak,ya,TRUE/FALSE
+ms_kegiatan,kualitas_kunjungan_kembali,Kunjungan Kembali,tidak,ya,TRUE/FALSE; minimal satu metode kualitas TRUE
+ms_kegiatan,kualitas_supervisi,Supervisi,tidak,ya,TRUE/FALSE
+ms_kegiatan,kualitas_taskforce,Task Force,tidak,ya,TRUE/FALSE
+ms_kegiatan,kualitas_lainnya,Kualitas Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,kualitas_lainnya_text,Metode Pemeriksaan Kualitas Lainnya,tidak,kondisional,Wajib jika kualitas_lainnya TRUE
+ms_kegiatan,penyesuaian_nonrespon,Apakah Melakukan Penyesuaian Nonrespon,tidak,ya,TRUE/FALSE
+ms_kegiatan,petugas_pengumpulan_data,Petugas Pengumpulan Data,tidak,kondisional,Wajib jika sarana PAPI/CAPI/CATI/CAWI TRUE
+ms_kegiatan,pendidikan_terendah_petugas,Persyaratan Pendidikan Terendah Petugas,tidak,kondisional,Wajib jika sarana PAPI/CAPI/CATI/CAWI TRUE
+ms_kegiatan,jumlah_petugas_supervisor,Jumlah Petugas Supervisor,tidak,kondisional,Angka
+ms_kegiatan,jumlah_petugas_enumerator,Jumlah Petugas Enumerator,tidak,kondisional,Angka
+ms_kegiatan,pelatihan_petugas,Apakah Melakukan Pelatihan Petugas,tidak,kondisional,TRUE/FALSE
+ms_kegiatan,tahap_editing,Penyuntingan (Editing),tidak,ya,TRUE/FALSE
+ms_kegiatan,tahap_coding,Penyandian (Coding),tidak,ya,TRUE/FALSE
+ms_kegiatan,tahap_data_entry,Data Entry,tidak,ya,TRUE/FALSE
+ms_kegiatan,tahap_validasi,Penyahihan (Validasi),tidak,ya,TRUE/FALSE
+ms_kegiatan,metode_analisis,Metode Analisis,tidak,ya,"DESKRIPTIF; INFERENSIA; DESKRIPTIF_DAN_INFERENSIA"
+ms_kegiatan,unit_analisis_individu,Unit Analisis Individu,tidak,ya,TRUE/FALSE; minimal satu unit analisis TRUE
+ms_kegiatan,unit_analisis_rumah_tangga,Unit Analisis Rumah Tangga,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_analisis_usaha_perusahaan,Unit Analisis Usaha/Perusahaan,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_analisis_lainnya,Unit Analisis Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,unit_analisis_lainnya_text,Unit Analisis Lainnya Text,tidak,kondisional,Wajib jika unit_analisis_lainnya TRUE
+ms_kegiatan,tingkat_nasional,Tingkat Nasional,tidak,ya,TRUE/FALSE; minimal satu tingkat TRUE
+ms_kegiatan,tingkat_provinsi,Tingkat Provinsi,tidak,ya,TRUE/FALSE
+ms_kegiatan,tingkat_kabupaten_kota,Tingkat Kabupaten/Kota,tidak,ya,TRUE/FALSE
+ms_kegiatan,tingkat_lainnya,Tingkat Lainnya,tidak,ya,TRUE/FALSE
+ms_kegiatan,tingkat_lainnya_text,Tingkat Penyajian Hasil Analisis Lainnya,tidak,kondisional,Wajib jika tingkat_lainnya TRUE
+ms_kegiatan,produk_tercetak,Tercetak (Hardcopy),tidak,ya,TRUE/FALSE
+ms_kegiatan,produk_digital,Digital (Softcopy),tidak,ya,TRUE/FALSE
+ms_kegiatan,produk_mikrodata,Data Mikro,tidak,ya,TRUE/FALSE
+ms_kegiatan,rilis_tercetak_tanggal,Tanggal Rilis Tercetak,tidak,kondisional,Wajib jika produk_tercetak TRUE
+ms_kegiatan,rilis_digital_tanggal,Tanggal Rilis Digital,tidak,kondisional,Wajib jika produk_digital TRUE
+ms_kegiatan,rilis_mikrodata_tanggal,Tanggal Rilis Data Mikro,tidak,kondisional,Wajib jika produk_mikrodata TRUE
+ms_kegiatan_variabel_dikumpulkan,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi ke ms_kegiatan
+ms_kegiatan_variabel_dikumpulkan,variabel_nama,Nama Variabel (Karakteristik),tidak,ya,Satu baris per variabel
+ms_kegiatan_variabel_dikumpulkan,variabel_konsep,Konsep,tidak,ya,Teks
+ms_kegiatan_variabel_dikumpulkan,variabel_definisi,Definisi,tidak,ya,Teks
+ms_kegiatan_variabel_dikumpulkan,variabel_referensi_waktu,Referensi Waktu,tidak,ya,Teks
+ms_kegiatan_wilayah,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi ke ms_kegiatan
+ms_kegiatan_wilayah,wilayah_provinsi,Provinsi,tidak,kondisional,Wajib jika cakupan sebagian
+ms_kegiatan_wilayah,wilayah_kabupaten_kota,Kabupaten/Kota,tidak,kondisional,Wajib jika cakupan sebagian
+ms_variabel,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi ke ms_kegiatan
+ms_variabel,ms_keg_id,Parent kegiatan ID,opsional,opsional,Boleh kosong; otomatis dicari dari judul_kegiatan/run_state saat phase dijalankan
+ms_variabel,id_sds,SDS ID,tidak,tidak,Jika memilih dari SDS
+ms_variabel,nama,Nama Variabel,ya,ya,Pilih SDS atau input manual
+ms_variabel,alias,Alias,ya,ya,Isi - bila tidak ada alias khusus
+ms_variabel,definisi,Definisi Variabel,ya,ya,Textarea
+ms_variabel,konsep,Konsep,ya,ya,Bisa berulang; pisahkan dengan |
+ms_variabel,referensi_pemilihan,Referensi Pemilihan,ya,ya,Bisa berulang; pisahkan dengan |
+ms_variabel,referensi_waktu,Referensi Waktu,ya,ya,Teks
+ms_variabel,ukuran,Ukuran,tidak,tidak,Isi - bila tidak ada ukuran khusus
+ms_variabel,satuan,Satuan,tidak,kondisional,Isi - bila tidak ada satuan khusus
+ms_variabel,tipe_data,Tipe Data,ya,ya,Contoh CHARACTER
+ms_variabel,aturan_validasi,Aturan Validasi,ya,ya,Bisa berulang; pisahkan dengan |
+ms_variabel,kalimat_pertanyaan,Kalimat Pertanyaan,ya,ya,Isi - bila tidak berupa pertanyaan
+ms_variabel,bisa_diakses_umum,Apakah variabel dapat diakses umum,tidak,ya,Default TRUE
+ms_variabel_value_domain,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi
+ms_variabel_value_domain,variabel_nama,Parent variabel,ya,ya,Untuk relasi
+ms_variabel_value_domain,value_domain_kode,Kode Item Klasifikasi,ya,ya,Satu baris per item; contoh 32010026
+ms_variabel_value_domain,value_domain_nilai,Nama Item Klasifikasi,ya,ya,Satu baris per item; contoh Wilayah
+ms_indikator,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi ke ms_kegiatan
+ms_indikator,ms_keg_id,Parent kegiatan ID,opsional,opsional,Boleh kosong; otomatis dicari dari judul_kegiatan/run_state saat phase dijalankan
+ms_indikator,id_sds,SDS ID,tidak,tidak,Jika memilih dari SDS
+ms_indikator,nama,Nama Indikator,ya,ya,Pilih SDS atau input manual
+ms_indikator,definisi,Definisi Indikator,tidak,ya,Default "-" bila kosong
+ms_indikator,konsep,Konsep,tidak,ya,Bisa berulang; pisahkan dengan |; default "-"
+ms_indikator,interpretasi,Interpretasi,tidak,ya,Default "-" bila kosong
+ms_indikator,metode_perhitungan,Metode Perhitungan,tidak,ya,Default "-" bila kosong
+ms_indikator,rumus,Rumus,tidak,ya,Field formula/math; default "-"
+ms_indikator,ukuran,Ukuran,tidak,tidak,Default "-" bila kosong
+ms_indikator,satuan,Satuan,tidak,kondisional,Wajib bila ukuran terisi; default "-"
+ms_indikator,klasifikasi_penyajian,Klasifikasi Penyajian,tidak,ya,Bisa berulang; pisahkan dengan |; default Wilayah
+ms_indikator,indikator_komposit,Apakah Indikator Komposit,tidak,ya,TRUE/FALSE; default FALSE
+ms_indikator,level_estimasi,Level Estimasi,tidak,ya,Default Provinsi
+ms_indikator,bisa_diakses_umum,Apakah Indikator Dapat Diakses Umum,tidak,ya,Default TRUE
+ms_indikator_pembangun,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi
+ms_indikator_pembangun,indikator_nama,Parent indikator,ya,ya,Untuk relasi
+ms_indikator_pembangun,indikator_pembangun_nama,Nama Indikator Pembangun,kondisional,ya,Wajib jika indikator_komposit TRUE; satu baris per item
+ms_indikator_pembangun,sumber_publikasi,Publikasi Ketersediaan,kondisional,ya,Wajib jika indikator_komposit TRUE; bisa berulang; pisahkan dengan |
+ms_indikator_variabel_pembangun,judul_kegiatan,Parent kegiatan,ya,ya,Untuk relasi
+ms_indikator_variabel_pembangun,indikator_nama,Parent indikator,ya,ya,Untuk relasi
+ms_indikator_variabel_pembangun,variabel_pembangun_nama,Nama Variabel Pembangun,kondisional,ya,Wajib jika indikator_komposit FALSE; satu baris per item
+ms_indikator_variabel_pembangun,kegiatan_penghasil,Kegiatan Penghasil Variabel Pembangun,kondisional,ya,Wajib jika indikator_komposit FALSE; bisa berulang; pisahkan dengan |
