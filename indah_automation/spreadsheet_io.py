@@ -72,10 +72,18 @@ def normalize_slug(value: str) -> str:
 def name_matches_slug(name: str, slug: str) -> bool:
     normalized_name = normalize_slug(name)
     normalized_slug = normalize_slug(slug)
+    excel_truncated_slug = normalized_slug[:31]
     return (
         normalized_name == normalized_slug
         or normalized_name.endswith(normalized_slug)
         or normalized_slug in normalized_name.split("_sheet_")
+        or (
+            len(normalized_slug) > 31
+            and (
+                normalized_name == excel_truncated_slug
+                or normalized_name.endswith(excel_truncated_slug)
+            )
+        )
     )
 
 
