@@ -239,6 +239,11 @@ button.secondary,
   background: #ffffff;
   color: var(--blue);
 }
+button.success,
+.button.success {
+  background: var(--green);
+  border-color: #0a6452;
+}
 button.danger,
 .button.danger {
   background: var(--red);
@@ -562,8 +567,8 @@ def render_phase_form(phase: str, config: Dict[str, object]) -> str:
         <input type="checkbox" name="verbose" value="1">
         <span>Verbose</span>
       </label>
-      <button class="secondary" type="submit" name="submit" value="1" data-loading-label="Menyimpan draft {escape(str(config["title"]))}">Simpan Draft</button>
-      <button type="submit" name="final_submit" value="1" data-loading-label="Submit langsung {escape(str(config["title"]))}" data-confirm="Submit langsung ke INDAH? Pastikan isian sudah benar karena status akan dikirim sebagai SUBMITTED/REVISED.">Submit Langsung</button>
+      <button type="submit" name="submit" value="1" data-loading-label="Menyimpan draft {escape(str(config["title"]))}">Simpan Draft</button>
+      <button class="success" type="submit" name="final_submit" value="1" data-loading-label="Submit langsung {escape(str(config["title"]))}" data-confirm="Submit langsung ke INDAH? Pastikan isian sudah benar karena status akan dikirim sebagai SUBMITTED/REVISED.">Submit Langsung</button>
     </div>
   </form>
 </section>
