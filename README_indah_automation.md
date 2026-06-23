@@ -52,6 +52,35 @@ Catatan login: login manual dengan browser lebih aman dijalankan dari host seper
 
 Setelah `.indah_session/storage_state.json` ada, container dapat memakai session itu karena folder project dimount.
 
+## Docker Compose Dengan noVNC
+
+Jalankan UI + browser remote untuk login manual:
+
+```bash
+cd "Meta Indah 2026"
+docker compose -f docker-compose.vnc.yml up -d --build
+```
+
+Buka UI automation:
+
+```text
+http://127.0.0.1:8765
+```
+
+Buka browser remote noVNC:
+
+```text
+http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=remote
+```
+
+Kalau memakai Cloudflare Tunnel, arahkan Public Hostname ke service berikut:
+
+- `metadata.domainkamu.com` -> `http://localhost:8765`
+- `vnc.domainkamu.com` -> `http://localhost:6080`
+
+Aktifkan Cloudflare Access untuk dua hostname itu supaya UI dan noVNC tidak terbuka publik.
+Saat user klik **Buka login manual** di UI, browser login INDAH akan muncul di halaman noVNC dan session tetap tersimpan di `.indah_session/storage_state.json`.
+
 Setiap phase menerima:
 
 - file satuan `.csv`, `.tsv`, `.xlsx`, atau `.xlsm`

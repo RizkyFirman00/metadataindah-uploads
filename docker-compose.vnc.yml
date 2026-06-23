@@ -1,0 +1,18 @@
+services:
+  indah-ui-vnc:
+    build:
+      context: .
+      dockerfile: Dockerfile.vnc
+    container_name: indah-metadata-ui-vnc
+    working_dir: /app
+    ports:
+      - "8765:8765"
+      - "6080:6080"
+    environment:
+      DISPLAY: ":1"
+      PYTHONUNBUFFERED: "1"
+      VNC_RESOLUTION: "1366x768x24"
+      VNC_PASSWORD: "${VNC_PASSWORD:-}"
+    volumes:
+      - .:/app
+    restart: unless-stopped
