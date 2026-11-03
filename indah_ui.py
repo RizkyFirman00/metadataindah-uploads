@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import email.message
 import email.utils
 import hashlib
@@ -381,28 +382,98 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  var onlyProblems = document.getElementById("only-problems");
+  var itemsTable = document.getElementById("items");
+  if (onlyProblems && itemsTable) {
+    onlyProblems.addEventListener("change", function () { itemsTable.classList.toggle("only-problems", onlyProblems.checked); });
+  }
+
   var progress = document.getElementById("progress");
   if (progress) {
     var runId = progress.getAttribute("data-run-id");
-    var bar = document.getElementById("bar");
-    var pct = document.getElementById("pct");
-    var label = document.getElementById("progress-label");
-    var log = document.getElementById("progress-log");
+    var heading = progress.getAttribute("data-heading") || "Proses berjalan";
+    var lastItems = -1;
+    function setText(id, value) { var el = document.getElementById(id); if (el) el.textContent = value; }
+    function setNotice(id, text) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.hidden = !text;
+      el.querySelector("span").textContent = text || "";
+    }
+    function renderItems(items) {
+      var body = itemsTable.querySelector("tbody");
+      body.textContent = "";
+      if (!items.length) {
+        var empty = document.createElement("tr");
+        empty.className = "empty-row";
+        var cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.textContent = "Belum ada data yang selesai diproses.";
+        empty.appendChild(cell);
+        body.appendChild(empty);
+        return;
+      }
+      var pills = {success: "ok", failed: "bad", skipped: "warn"};
+      var problems = 0;
+      items.slice().reverse().forEach(function (item) {
+        if (item.outcome !== "success") problems += 1;
+        var row = document.createElement("tr");
+        row.className = item.outcome === "success" ? "is-ok" : "is-problem";
+        [["num", item.n], ["", item.title], ["pill", item.label], ["", item.message], ["time", item.time]].forEach(function (spec) {
+          var td = document.createElement("td");
+          if (spec[0] === "pill") {
+            var pill = document.createElement("span");
+            pill.className = "pill pill-" + (pills[item.outcome] || "warn");
+            pill.textContent = spec[1] || "";
+            td.appendChild(pill);
+          } else {
+            if (spec[0]) td.className = spec[0];
+            td.textContent = spec[1] == null ? "" : String(spec[1]);
+          }
+          row.appendChild(td);
+        });
+        body.appendChild(row);
+      });
+      setText("problem-count", problems);
+    }
     function poll() {
       fetch("/run-status?id=" + encodeURIComponent(runId), {cache: "no-store"})
         .then(function (r) { return r.json(); })
         .then(function (data) {
           var value = data.percent || 0;
-          bar.style.width = value + "%";
-          pct.textContent = value + "%";
-          label.textContent = (data.last_line || "Menyiapkan proses...").split("\n")[0];
-          log.textContent = data.output || "Menyiapkan proses...";
+          document.getElementById("bar").style.width = value + "%";
+          setText("pct", value + "%");
+          var processed = (data.success || 0) + (data.failed || 0) + (data.skipped || 0);
+          setText("progress-label", processed + " dari " + (data.total || 0) + " data diproses");
+          setText("now-text", data.now_text || "Memproses");
+          setText("now-title", data.now_title || "");
+          setText("s-ok", data.success || 0);
+          setText("s-fail", data.failed || 0);
+          setText("s-skip", data.skipped || 0);
+          setText("s-left", data.remaining || 0);
+          setText("t-elapsed", data.elapsed_text || "-");
+          setText("t-start", data.started_text || "-");
+          setText("t-avg", data.avg_text || "-");
+          setText("t-eta", data.eta_text || "-");
+          setText("t-finish", data.finish_text || "-");
+          setNotice("retry", data.retry);
+          setNotice("abort", data.aborted);
+          setNotice("warnings", (data.warnings || []).join(" · "));
+          var stage = data.stage_index || 0;
+          document.querySelectorAll("#stages li").forEach(function (li) {
+            var n = Number(li.getAttribute("data-stage"));
+            li.classList.toggle("is-done", n < stage);
+            li.classList.toggle("is-current", n === stage);
+          });
+          var items = data.items || [];
+          if (items.length !== lastItems) { lastItems = items.length; renderItems(items); }
+          document.title = value + "% · " + heading;
           if (data.done) { window.location.href = "/run?id=" + encodeURIComponent(runId); }
         })
-        .catch(function () { label.textContent = "Menunggu respons proses..."; });
+        .catch(function () { setText("now-text", "Menunggu respons server..."); });
     }
     poll();
-    window.setInterval(poll, 1200);
+    window.setInterval(poll, 1500);
   }
 });
 </script>"""
@@ -860,7 +931,7 @@ def handle_phase_run(phase: str, handler: BaseHTTPRequestHandler, state_path: Pa
         )
         command = build_phase_command(phase, config, prepared_dir, form, state_path)
         (run_dir / "summary.json").write_text(
-            json.dumps({"run_id": run_id, "command": command, "returncode": None, "prepared": prepared}, indent=2, ensure_ascii=False),
+            json.dumps({"run_id": run_id, "command": command, "returncode": None, "prepared": prepared, "started_at": time.time()}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         thread = threading.Thread(
@@ -906,7 +977,7 @@ def handle_cleanup_run(target: str, handler: BaseHTTPRequestHandler, state_path:
         if cleanup_ms_keg_id:
             command.extend(["--ms-keg-id", cleanup_ms_keg_id])
         (run_dir / "summary.json").write_text(
-            json.dumps({"run_id": run_id, "command": command, "returncode": None, "prepared": {}}, indent=2, ensure_ascii=False),
+            json.dumps({"run_id": run_id, "command": command, "returncode": None, "prepared": {}, "started_at": time.time()}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         thread = threading.Thread(
@@ -1110,15 +1181,21 @@ def run_command_streaming(command: List[str], cwd: Path, run_dir: Path) -> subpr
     )
     stdout_parts: List[str] = []
     stderr_parts: List[str] = []
-    def drain(stream, path: Path, parts: List[str]) -> None:
-        with path.open("w", encoding="utf-8") as output:
+    timeline_path = run_dir / "timeline.jsonl"
+
+    def drain(stream, path: Path, parts: List[str], timeline: Optional[Path] = None) -> None:
+        timeline_file = timeline.open("a", encoding="utf-8") if timeline else contextlib.nullcontext()
+        with path.open("w", encoding="utf-8") as output, timeline_file as stamps:
             for line in stream or []:
                 parts.append(line)
                 output.write(line)
                 output.flush()
+                if stamps is not None and (line.startswith("INDAH_PROGRESS ") or line.startswith("[")):
+                    stamps.write(json.dumps({"t": round(time.time(), 2), "line": line.rstrip("\n")}, ensure_ascii=False) + "\n")
+                    stamps.flush()
 
     readers = [
-        threading.Thread(target=drain, args=(process.stdout, stdout_path, stdout_parts)),
+        threading.Thread(target=drain, args=(process.stdout, stdout_path, stdout_parts, timeline_path)),
         threading.Thread(target=drain, args=(process.stderr, stderr_path, stderr_parts)),
     ]
     for reader in readers:
@@ -1145,11 +1222,18 @@ def save_run_artifacts(
     prepared: Dict[str, Dict[str, str]],
     result: subprocess.CompletedProcess,
 ) -> None:
+    started_at = None
+    try:
+        started_at = json.loads((run_dir / "summary.json").read_text(encoding="utf-8")).get("started_at")
+    except (OSError, ValueError):
+        pass
     summary = {
         "run_id": run_id,
         "command": command,
         "returncode": result.returncode,
         "prepared": prepared,
+        "started_at": started_at,
+        "finished_at": time.time(),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     (run_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
@@ -1249,6 +1333,195 @@ def upload_summary(stdout: str, stderr: str, returncode=None, error: str = "") -
             "output": "\n".join([last_line] + list(dict.fromkeys(issues)))}
 
 
+STAGE_ORDER = {"validation": 1, "payload": 2, "upload": 2, "item": 2, "mapping": 3}
+
+
+def fmt_duration(seconds: Optional[float]) -> str:
+    if seconds is None or seconds < 0:
+        return "-"
+    total = int(round(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours} jam {minutes} mnt"
+    if minutes:
+        return f"{minutes} mnt {secs} dtk"
+    return f"{secs} dtk"
+
+
+def fmt_clock(timestamp: Optional[float], with_date: bool = False) -> str:
+    if not timestamp:
+        return "-"
+    moment = datetime.fromtimestamp(timestamp, WIB)
+    return moment.strftime("%d %b, %H.%M.%S WIB" if with_date else "%H.%M.%S")
+
+
+def read_timeline(run_dir: Path) -> List[tuple]:
+    path = run_dir / "timeline.jsonl"
+    entries = []
+    if not path.exists():
+        return entries
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(item, dict) and isinstance(item.get("line"), str):
+            entries.append((item.get("t"), item["line"]))
+    return entries
+
+
+def run_details(run_dir: Path, stdout: str, summary: Dict[str, object], done: bool, remaining: int,
+                now: Optional[float] = None) -> Dict[str, object]:
+    now = time.time() if now is None else now
+    kind = "cleanup" if run_dir.name.startswith("cleanup") else "upload"
+    timeline = read_timeline(run_dir)
+    lines = timeline or [(None, line) for line in stdout.splitlines()]
+
+    events = []
+    for stamp, line in lines:
+        if line.startswith("INDAH_PROGRESS "):
+            try:
+                event = json.loads(line[len("INDAH_PROGRESS "):])
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append((stamp, event))
+
+    done_label = "Terhapus" if kind == "cleanup" else "Tersimpan"
+    items = []
+    for stamp, event in events:
+        if event.get("stage") != "item":
+            continue
+        outcome = str(event.get("outcome") or "")
+        message = str(event.get("message") or "")
+        items.append({
+            "n": event.get("current"),
+            "title": str(event.get("title") or "Data"),
+            "outcome": outcome,
+            "label": {"success": done_label, "failed": "Gagal", "skipped": "Dilewati"}.get(outcome, outcome or "-"),
+            "message": friendly_error(message) if message and outcome != "success" else "",
+            "time": fmt_clock(stamp),
+        })
+
+    current = next((event for _, event in reversed(events) if event.get("stage") != "item"), events[-1][1] if events else {})
+    stage = str(current.get("stage") or "")
+    stage = "upload" if stage in {"payload", "item"} else stage
+    index = current.get("current") or 0
+    total = current.get("total") or 0
+    action = "Menghapus" if kind == "cleanup" else "Mengirim"
+    if done:
+        now_text = "Proses selesai"
+    elif not events:
+        now_text = "Membaca file dan menyiapkan proses"
+    elif stage == "validation":
+        now_text = f"Memeriksa data {index} dari {total}" if index else "Memeriksa isian file"
+    elif stage == "upload":
+        now_text = f"{action} data {index} dari {total}"
+    elif stage == "mapping":
+        now_text = "Mencatat hasil upload"
+    else:
+        now_text = "Memproses"
+    now_title = "" if done else str(current.get("title") or "")
+
+    started = summary.get("started_at") or (timeline[0][0] if timeline else None)
+    finished = summary.get("finished_at")
+    if done and not finished and timeline:
+        finished = timeline[-1][0]
+    elapsed = ((finished if done else now) - started) if started and (finished or not done) else None
+
+    upload_starts = [stamp for stamp, event in events if stamp and event.get("stage") in {"payload", "upload"}]
+    first_upload = upload_starts[0] if upload_starts else None
+    finished_items = [stamp for stamp, event in events
+                      if stamp and event.get("stage") == "item" and first_upload and stamp >= first_upload]
+    average = (finished_items[-1] - first_upload) / len(finished_items) if finished_items and first_upload else None
+    eta = average * remaining if (average is not None and not done) else None
+
+    retry = ""
+    aborted = ""
+    warnings = []
+    for stamp, line in lines:
+        if line.startswith("[retry") and not done and (stamp is None or now - stamp < 45):
+            retry = "INDAH lambat merespons. Aplikasi mencoba mengirim ulang otomatis, mohon tunggu."
+        elif line.startswith("[ok]") or line.startswith("INDAH_PROGRESS "):
+            retry = ""
+        if line.startswith("[abort]"):
+            aborted = ("Upload dibatalkan karena ada data yang tidak lolos pemeriksaan. Tidak ada data yang "
+                       "dikirim ke INDAH. Perbaiki data yang dilewati, lalu upload ulang.")
+        if line.startswith("[warn]"):
+            text = line[len("[warn]"):].strip()
+            if text not in warnings:
+                warnings.append(text)
+
+    return {
+        "kind": kind,
+        "stage": stage,
+        "stage_index": 4 if done else STAGE_ORDER.get(stage, 0),
+        "now_text": now_text,
+        "now_title": now_title,
+        "items": items[-1000:],
+        "elapsed_text": fmt_duration(elapsed),
+        "avg_text": (fmt_duration(average) + " / data") if average is not None else "-",
+        "eta_text": (fmt_duration(eta) if eta is not None else ("Menghitung..." if not done else "-")),
+        "finish_text": fmt_clock(now + eta) if eta is not None else ("-" if not done else fmt_clock(finished)),
+        "started_text": fmt_clock(started, with_date=True),
+        "finished_text": fmt_clock(finished, with_date=True) if done else "-",
+        "retry": retry,
+        "aborted": aborted,
+        "warnings": warnings[:10],
+    }
+
+
+def render_items_rows(items: List[Dict[str, object]]) -> str:
+    if not items:
+        return '<tr class="empty-row"><td colspan="5">Belum ada data yang selesai diproses.</td></tr>'
+    pill = {"success": "ok", "failed": "bad", "skipped": "warn"}
+    rows = []
+    for item in reversed(items):
+        outcome = str(item.get("outcome"))
+        rows.append(
+            f'<tr class="{"is-ok" if outcome == "success" else "is-problem"}">'
+            f'<td class="num">{escape(item.get("n") or "")}</td>'
+            f'<td>{escape(item.get("title"))}</td>'
+            f'<td><span class="pill pill-{pill.get(outcome, "warn")}">{escape(item.get("label"))}</span></td>'
+            f'<td>{escape(item.get("message") or "")}</td>'
+            f'<td class="time">{escape(item.get("time") or "")}</td></tr>'
+        )
+    return "".join(rows)
+
+
+def render_items_table(items: List[Dict[str, object]]) -> str:
+    problems = sum(1 for item in items if item.get("outcome") != "success")
+    return f"""
+  <div class="section">
+    <div class="section-head">
+      <h2 class="step">Rincian per data</h2>
+      <label class="check small"><input type="checkbox" id="only-problems"> Hanya yang bermasalah (<span id="problem-count">{problems}</span>)</label>
+    </div>
+    <div class="table-wrap">
+      <table class="items" id="items">
+        <thead><tr><th>No</th><th>Data</th><th>Status</th><th>Keterangan</th><th>Waktu</th></tr></thead>
+        <tbody>{render_items_rows(items)}</tbody>
+      </table>
+    </div>
+  </div>"""
+
+
+def render_times(details: Dict[str, object], done: bool) -> str:
+    if done:
+        cells = (("Mulai", details.get("started_text")), ("Selesai", details.get("finished_text")),
+                 ("Lama proses", details.get("elapsed_text")), ("Rata-rata", details.get("avg_text")))
+    else:
+        cells = (("Mulai", details.get("started_text")), ("Rata-rata", details.get("avg_text")),
+                 ("Perkiraan sisa waktu", details.get("eta_text")), ("Perkiraan selesai", details.get("finish_text")))
+    ids = ("t-start", "t-avg", "t-eta", "t-finish") if not done else ("", "", "", "")
+    parts = []
+    for (label, value), ident in zip(cells, ids):
+        id_attr = f' id="{ident}"' if ident else ""
+        parts.append(f"<div><dt>{escape(label)}</dt><dd{id_attr}>{escape(value or '-')}</dd></div>")
+    return f'<div class="section"><dl class="times">{"".join(parts)}</dl></div>'
+
+
 def run_status(run_id: str, owner: str) -> Dict[str, object]:
     safe_id = safe_filename(run_id)
     run_dir = UI_RUNS_ROOT / safe_id
@@ -1263,28 +1536,57 @@ def run_status(run_id: str, owner: str) -> Dict[str, object]:
         summary = {}
     error_path = run_dir / "error.txt"
     error = error_path.read_text(encoding="utf-8") if error_path.exists() else ""
-    return upload_summary(stdout, stderr, summary.get("returncode"), error)
+    result = upload_summary(stdout, stderr, summary.get("returncode"), error)
+    result.update(run_details(run_dir, stdout, summary, bool(result["done"]), int(result["remaining"])))
+    return result
+
+
+CLOSE_NOTE = 'Proses berjalan di server, jadi halaman ini boleh ditutup. Hasilnya bisa dibuka lagi lewat <a href="/riwayat">Riwayat upload</a>.'
 
 
 def render_run_progress(run_id: str, phase: str) -> str:
-    if phase in PHASES:
-        heading = f"Mengunggah {PHASE_INFO[phase][0].lower()}"
-    else:
-        heading = "Penghapusan data berjalan"
+    cleanup = phase not in PHASES
+    heading = "Penghapusan data berjalan" if cleanup else f"Mengunggah {PHASE_INFO[phase][0].lower()}"
+    action_label = "Menghapus dari INDAH" if cleanup else "Mengirim ke INDAH"
+    stats = "".join(
+        f'<div class="stat {kind}"><b id="{ident}">0</b><span>{label}</span></div>'
+        for ident, label, kind in (
+            ("s-ok", "Terhapus" if cleanup else "Tersimpan", "ok"),
+            ("s-fail", "Gagal", "bad"),
+            ("s-skip", "Dilewati", "warn"),
+            ("s-left", "Sisa", ""),
+        )
+    )
+    empty_details = {"started_text": "-", "avg_text": "-", "eta_text": "Menghitung...", "finish_text": "-"}
     body = f"""
 {page_head(heading, eyebrow="Proses berjalan")}
-<section class="panel" id="progress" data-run-id="{escape(run_id)}">
+<section class="panel" id="progress" data-run-id="{escape(run_id)}" data-heading="{escape(heading)}">
   <div class="section">
-    <span class="status status-run">Sedang berjalan</span>
-    <div class="progress-head"><span id="progress-label">Menyiapkan proses...</span><strong id="pct">0%</strong></div>
+    <div class="section-head">
+      <span class="status status-run" id="status-pill">Sedang berjalan</span>
+      <span class="small muted">Sudah berjalan <strong id="t-elapsed">0 dtk</strong></span>
+    </div>
+    <ol class="stages" id="stages" aria-label="Tahap proses">
+      <li data-stage="0">Membaca file</li>
+      <li data-stage="1">Memeriksa isian</li>
+      <li data-stage="2">{action_label}</li>
+      <li data-stage="3">Mencatat hasil</li>
+    </ol>
+    <div class="now" aria-live="polite">
+      <span class="now-label" id="now-text">Membaca file dan menyiapkan proses</span>
+      <strong class="now-title" id="now-title"></strong>
+    </div>
+    <div class="progress-head"><span id="progress-label">0 dari 0 data diproses</span><strong id="pct">0%</strong></div>
     <div class="progress-track" role="progressbar" aria-label="Kemajuan proses" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" id="bar"></div></div>
-    {notice("warn", "Jangan tutup halaman ini sampai proses selesai. Halaman pindah otomatis ke hasil.")}
+    <div id="retry" class="notice notice-warn" role="status" hidden>{ICON_WARN}<span></span></div>
+    <div id="abort" class="notice notice-error" role="alert" hidden>{ICON_WARN}<span></span></div>
+    <div id="warnings" class="notice notice-warn" hidden>{ICON_WARN}<span></span></div>
   </div>
+  <div class="stats">{stats}</div>
+  {render_times(empty_details, False)}
+  {render_items_table([])}
   <div class="section">
-    <details>
-      <summary>Detail proses</summary>
-      <pre class="log" id="progress-log" aria-live="polite">Menyiapkan proses...</pre>
-    </details>
+    {notice("ok", CLOSE_NOTE)}
     <p class="small muted">Nomor proses <code>{escape(run_id)}</code></p>
   </div>
 </section>
@@ -1300,6 +1602,7 @@ def render_run_result(
     returncode: int,
     stdout: str,
     stderr: str,
+    details: Optional[Dict[str, object]] = None,
 ) -> str:
     result = upload_summary(stdout, stderr, returncode)
     status = str(result["status"])
@@ -1324,9 +1627,11 @@ def render_run_result(
             (result["success"], "Tersimpan", "ok"),
             (result["failed"], "Gagal", "bad" if result["failed"] else ""),
             (result["skipped"], "Dilewati", "warn" if result["skipped"] else ""),
-            (result["remaining"], "Belum dikirim", "warn" if result["remaining"] else ""),
+            (result["remaining"], "Belum diproses", "warn" if result["remaining"] else ""),
         )
     )
+    if phase not in PHASE_INFO:
+        stats = stats.replace("<span>Tersimpan</span>", "<span>Terhapus</span>")
     again = f"/?phase={phase}" if phase in PHASES else "/hapus"
     body = f"""
 {page_head(heading, eyebrow=PHASE_INFO[phase][0] if phase in PHASE_INFO else "Hapus data")}
@@ -1337,8 +1642,11 @@ def render_run_result(
     <div class="progress-track"><div class="progress-bar" style="width: {result['percent']}%"></div></div>
   </div>
   <div class="stats">{stats}</div>
+  {render_times(details, True) if details else ""}
+  {render_items_table(details["items"]) if details and details.get("items") else ""}
   <div class="section">
     {warning}
+    {notice("error", escape(details["aborted"])) if details and details.get("aborted") else ""}
     <details{" open" if problems or status == "Terhenti" else ""}>
       <summary>Kesimpulan</summary>
       <pre class="log">{escape(result['output'])}</pre>
@@ -1404,8 +1712,9 @@ def render_saved_run(run_id: str, owner: str) -> str:
         return render_run_progress(safe_id, phase)
     stdout = (run_dir / "stdout.txt").read_text(encoding="utf-8") if (run_dir / "stdout.txt").exists() else ""
     stderr = (run_dir / "stderr.txt").read_text(encoding="utf-8") if (run_dir / "stderr.txt").exists() else ""
+    details = run_details(run_dir, stdout, summary, True, 0)
     return render_run_result(safe_id, safe_id.split("-", 1)[0], summary.get("prepared") or {},
-                             summary.get("command") or [], summary["returncode"], stdout, stderr)
+                             summary.get("command") or [], summary["returncode"], stdout, stderr, details)
 
 
 

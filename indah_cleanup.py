@@ -9,6 +9,7 @@ from indah_automation.shared import (
     IndahError,
     clean,
     load_auth,
+    upload_progress,
     ms_keg_title,
     file_lock,
     read_csv_rows,
@@ -58,14 +59,18 @@ def main() -> None:
         targets = resolve_kegiatan_targets(args, run_state, client)
         if not targets:
             print("[info] Tidak ada kegiatan target untuk cleanup.")
+        plan = plan_cleanup(phases, targets, client, allow_non_draft=args.allow_non_draft)
+        progress = {"n": 0, "total": sum(len(children) for _, _, children in plan)}
+        upload_progress("validation", 0, progress["total"])
         for phase in phases:
             deleted, failed = cleanup_phase_by_kegiatan(
                 phase,
+                [(target, children) for plan_phase, target, children in plan if plan_phase == phase],
                 targets,
                 run_state,
                 client,
                 execute=args.execute,
-                allow_non_draft=args.allow_non_draft,
+                progress=progress,
             )
             total_deleted += deleted
             total_failed += failed
@@ -128,51 +133,73 @@ def resolve_kegiatan_targets(args: argparse.Namespace, run_state: Path, client: 
     return targets
 
 
+def plan_cleanup(
+    phases: List[str],
+    targets: List[Dict[str, object]],
+    client: IndahClient,
+    *,
+    allow_non_draft: bool = False,
+) -> List[Tuple[str, Dict[str, object], List[Dict[str, object]]]]:
+    plan = []
+    for phase in phases:
+        for target in targets:
+            title = clean(target.get("title")) or "-"
+            status = clean(target.get("status")) or ""
+            if not allow_non_draft and status not in {"DRAFT", "CORRECTION_REQUIRED", "SUBMITTED", ""}:
+                print(f"[warn] {phase}: kegiatan {title} berstatus {status}, tidak dihapus.")
+                continue
+            children = children_for_target(client, target, phase)
+            if not children:
+                print(f"[info] {phase}: tidak ada data yang bisa dibaca untuk kegiatan {title} ({target['id']})")
+                continue
+            plan.append((phase, target, children))
+    return plan
+
+
 def cleanup_phase_by_kegiatan(
     phase: str,
+    work: List[Tuple[Dict[str, object], List[Dict[str, object]]]],
     targets: List[Dict[str, object]],
     run_state: Path,
     client: IndahClient,
     *,
     execute: bool,
-    allow_non_draft: bool = False,
+    progress: Optional[Dict[str, int]] = None,
 ) -> Tuple[int, int]:
     deleted = 0
     failed = 0
     deleted_ids = set()
     failed_ids = set()
     target_titles = {clean(target.get("title")) or "" for target in targets}
+    progress = progress if progress is not None else {"n": 0, "total": sum(len(children) for _, children in work)}
 
-    for target in targets:
-        ms_keg_id = target["id"]
+    for target, children in work:
         title = clean(target.get("title")) or "-"
-        status = clean(target.get("status")) or ""
-        if not allow_non_draft and status not in {"DRAFT", "CORRECTION_REQUIRED", "SUBMITTED", ""}:
-            print(f"[skip] {phase}: kegiatan {title} ({ms_keg_id}) status {status}; tidak dihapus tanpa --allow-non-draft")
-            continue
-        children = children_for_target(client, target, phase)
-        if not children:
-            print(f"[info] {phase}: tidak ada data yang bisa dibaca untuk kegiatan {title} ({ms_keg_id})")
-            continue
         for child in children:
             item_id = clean(child.get("id"))
             label = child_label(child)
+            progress["n"] += 1
+            item_title = f"{phase.capitalize()} · {title} / {label}"
             if not item_id:
                 print(f"[skip] {phase}: id kosong untuk {title} / {label}")
+                upload_progress("item", progress["n"], progress["total"], item_title, "skipped", "ID data kosong")
                 continue
             if not execute:
                 print(f"[dry-run] hapus {phase}: {title} / {label} -> {item_id}")
                 continue
+            upload_progress("upload", progress["n"], progress["total"], item_title)
             try:
                 delete_child(client, phase, item_id)
             except IndahError as exc:
                 failed += 1
                 failed_ids.add(item_id)
                 print(f"[error] gagal hapus {phase}: {title} / {label} -> {item_id}: {exc}")
+                upload_progress("item", progress["n"], progress["total"], item_title, "failed", str(exc))
                 continue
             deleted += 1
             deleted_ids.add(item_id)
             print(f"[ok] hapus {phase}: {title} / {label} -> {item_id}")
+            upload_progress("item", progress["n"], progress["total"], item_title, "success")
 
     if execute and (deleted_ids or target_titles):
         rewrite_phase_map(run_state, phase, target_titles, deleted_ids, failed_ids)

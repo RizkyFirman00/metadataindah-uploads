@@ -141,3 +141,34 @@ details > summary { cursor: pointer; font-size: 14px; font-weight: 600; min-heig
   .stat { padding: 16px; }
   .actions, .actions .btn { width: 100%; }
 }
+
+/* progres langsung */
+.stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.stages li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); font-size: 13px; color: var(--muted); }
+.stages li.is-done { color: var(--ok); }
+.stages li.is-done::before { content: "\2713  "; font-weight: 700; }
+.stages li.is-current { border: 2px solid var(--accent); padding: 9px 11px; background: var(--soft); color: var(--strong); font-weight: 600; }
+.now { display: flex; flex-direction: column; gap: 2px; }
+.now-label { font-size: 14px; color: var(--muted); }
+.now-title { font-size: 18px; font-weight: 600; color: var(--strong); overflow-wrap: anywhere; min-height: 1.5em; }
+.times { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+.times dt { font-size: 13px; color: var(--muted); }
+.times dd { margin: 2px 0 0; font-size: 16px; font-weight: 600; color: var(--strong); font-variant-numeric: tabular-nums; }
+.check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.table-wrap { max-height: 440px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.items { width: 100%; border-collapse: collapse; font-size: 14px; }
+.items th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.items td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.items tr:last-child td { border-bottom: 0; }
+.items td.num, .items td.time { font: 12px/1.6 "Geist Mono", monospace; color: var(--muted); white-space: nowrap; }
+.items.only-problems tr.is-ok { display: none; }
+.items .empty-row td { text-align: center; color: var(--muted); padding: 24px; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill-ok { background: var(--ok-soft); color: var(--ok); }
+.pill-bad { background: var(--danger-soft); color: var(--danger); }
+.pill-warn { background: var(--warn-soft); color: var(--warn); }
+@media (max-width: 560px) {
+  .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .items th:nth-child(5), .items td:nth-child(5) { display: none; }
+}
