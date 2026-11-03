@@ -162,6 +162,24 @@ Script akan membuat folder `run_state/`:
 
 Map ini dipakai agar phase variabel/indikator tahu `ms_keg_id` dari kegiatan yang sudah tersimpan.
 
+Upload dan penghapusan dari UI memakai map **per pengguna** di `run_state/users/<username>/`, supaya
+data satu akun tidak tercampur dengan akun lain. Saat folder pengguna dibuat pertama kali,
+`variabel_map.csv` dan `indikator_map.csv` lama disalin ke sana (kuncinya ID kegiatan, jadi aman).
+`kegiatan_map.csv` lama sengaja tidak disalin: kegiatan dicari ulang lewat API memakai akun pengguna.
+Script yang dijalankan manual dari terminal tetap memakai `run_state/` kecuali diberi `--run-state`.
+
+## Keamanan dan Perawatan UI
+
+- Link spreadsheet hanya menerima Google Sheets (`https://docs.google.com/spreadsheets/...`).
+- Ukuran unggahan maksimal 25 MB per permintaan, dan unduhan Google Sheets maksimal 20 MB.
+- Hasil proses (`/run`) hanya bisa dibuka dari browser yang menjalankannya.
+- Penghapusan dari UI wajib menyebut judul atau nomor kegiatan. Mode "semua kegiatan di map"
+  hanya tersedia lewat CLI (`indah_cleanup.py --from-kegiatan-map`).
+- Saat UI start, proses yang terputus oleh restart ditandai, lalu setiap 6 jam sesi login yang lebih
+  dari 30 hari dan folder `ui_runs/` serta `ui_uploads/` yang lebih tua dari `INDAH_RETENTION_DAYS`
+  (bawaan 90 hari) dihapus otomatis.
+- Koneksi ke API INDAH memakai verifikasi sertifikat SSL.
+
 ## Catatan
 
 - Tanpa `--submit`, script hanya validasi/dry-run dan tidak mengirim data.

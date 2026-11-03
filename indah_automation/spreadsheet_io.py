@@ -18,6 +18,15 @@ from .shared import IndahError, clean
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 DOC_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+MAX_XLSX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+GOOGLE_SHEETS_HOST = "docs.google.com"
+GOOGLE_REDIRECT_SUFFIXES = (".googleusercontent.com", ".google.com")
+ONLY_GOOGLE_SHEETS_MESSAGE = (
+    "Hanya link Google Sheets (https://docs.google.com/spreadsheets/...) yang didukung. "
+    "Untuk file lain, unduh dulu lalu unggah sebagai file Excel."
+)
 DATE_NUM_FMT_IDS = {
     14,
     15,
@@ -87,6 +96,21 @@ def name_matches_slug(name: str, slug: str) -> bool:
     )
 
 
+def is_allowed_redirect_host(host: Optional[str]) -> bool:
+    host = (host or "").lower()
+    return host == GOOGLE_SHEETS_HOST or host.endswith(GOOGLE_REDIRECT_SUFFIXES)
+
+
+class GoogleOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Ikuti redirect hanya ke https di domain Google (export Sheets memakai redirect)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlparse(newurl)
+        if target.scheme != "https" or not is_allowed_redirect_host(target.hostname):
+            raise IndahError(ONLY_GOOGLE_SHEETS_MESSAGE)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def download_spreadsheet_url(url: str, output_dir: Path) -> Path:
     normalized_url, extension = normalize_download_url(url)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -95,32 +119,36 @@ def download_spreadsheet_url(url: str, output_dir: Path) -> Path:
         normalized_url,
         headers={"User-Agent": "Mozilla/5.0 INDAH metadata automation"},
     )
+    opener = urllib.request.build_opener(GoogleOnlyRedirectHandler)
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            path.write_bytes(response.read())
+        with opener.open(request, timeout=120) as response:
+            data = response.read(MAX_DOWNLOAD_BYTES + 1)
+    except IndahError:
+        raise
     except Exception as exc:
         raise IndahError(f"Gagal download spreadsheet: {exc}") from exc
+    if len(data) > MAX_DOWNLOAD_BYTES:
+        raise IndahError(f"Ukuran spreadsheet melebihi batas {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB.")
+    path.write_bytes(data)
     return path
 
 
 def normalize_download_url(url: str) -> Tuple[str, str]:
-    parsed = urllib.parse.urlparse(url.strip())
-    if "docs.google.com" in parsed.netloc and "/spreadsheets/d/" in parsed.path:
-        match = re.search(r"/spreadsheets/d/([^/]+)", parsed.path)
-        if not match:
-            raise IndahError("URL Google Sheets tidak valid.")
-        sheet_id = match.group(1)
-        query = urllib.parse.parse_qs(parsed.query)
-        gid = query.get("gid", [None])[0]
-        if not gid and parsed.fragment:
-            gid = urllib.parse.parse_qs(parsed.fragment).get("gid", [None])[0]
-        if gid:
-            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}", ".csv"
-        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx", ".xlsx"
-    suffix = Path(parsed.path).suffix.lower()
-    if suffix in {".csv", ".tsv", ".xlsx", ".xlsm"}:
-        return url, suffix
-    return url, ".xlsx"
+    parsed = urllib.parse.urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or host != GOOGLE_SHEETS_HOST or "/spreadsheets/d/" not in parsed.path:
+        raise IndahError(ONLY_GOOGLE_SHEETS_MESSAGE)
+    match = re.search(r"/spreadsheets/d/([A-Za-z0-9_-]+)", parsed.path)
+    if not match:
+        raise IndahError("URL Google Sheets tidak valid.")
+    sheet_id = match.group(1)
+    query = urllib.parse.parse_qs(parsed.query)
+    gid = query.get("gid", [None])[0]
+    if not gid and parsed.fragment:
+        gid = urllib.parse.parse_qs(parsed.fragment).get("gid", [None])[0]
+    if gid and re.fullmatch(r"\d+", gid):
+        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}", ".csv"
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx", ".xlsx"
 
 
 def read_spreadsheet_tables(path: Path) -> Dict[str, TableData]:
@@ -160,6 +188,8 @@ def read_delimited_table(path: Path) -> TableData:
 def read_xlsx_tables(path: Path) -> Dict[str, TableData]:
     try:
         with zipfile.ZipFile(path) as archive:
+            if sum(info.file_size for info in archive.infolist()) > MAX_XLSX_UNCOMPRESSED_BYTES:
+                raise IndahError(f"Isi file Excel terlalu besar untuk diproses: {path.name}")
             shared_strings = read_shared_strings(archive)
             date_style_ids = read_date_style_ids(archive)
             sheet_targets = read_workbook_sheet_targets(archive)

@@ -10,6 +10,7 @@ from indah_automation.shared import (
     clean,
     load_auth,
     ms_keg_title,
+    file_lock,
     read_csv_rows,
     write_csv,
 )
@@ -230,22 +231,23 @@ def rewrite_phase_map(
     config = MAP_CONFIG[phase]
     path = run_state / config["path"]
     id_field = config["id_field"]
-    rows = read_csv_rows(path)
-    if not rows:
-        return
-    remaining = []
-    for row in rows:
-        item_id = clean(row.get(id_field)) or ""
-        title = clean(row.get("judul_kegiatan")) or ""
-        if item_id in failed_ids:
-            remaining.append(row)
-        elif item_id in deleted_ids:
-            continue
-        elif title in target_titles and not item_id:
-            continue
-        else:
-            remaining.append(row)
-    write_csv(path, config["fieldnames"], remaining)
+    with file_lock(path):
+        rows = read_csv_rows(path)
+        if not rows:
+            return
+        remaining = []
+        for row in rows:
+            item_id = clean(row.get(id_field)) or ""
+            title = clean(row.get("judul_kegiatan")) or ""
+            if item_id in failed_ids:
+                remaining.append(row)
+            elif item_id in deleted_ids:
+                continue
+            elif title in target_titles and not item_id:
+                continue
+            else:
+                remaining.append(row)
+        write_csv(path, config["fieldnames"], remaining)
     print(f"Map diperbarui: {path} ({len(remaining)} tersisa)")
 
 

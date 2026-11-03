@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import csv
+import fcntl
 import json
+import os
 import re
+import shutil
 import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -327,22 +331,59 @@ def rows_for_title(rows: Sequence[Dict[str, str]], title: str) -> List[Dict[str,
 
 
 def write_csv(path: Path, fieldnames: Sequence[str], rows: Sequence[Dict[str, Any]]) -> None:
+    """Tulis CSV secara atomik: file lama tidak pernah tertinggal setengah tertulis."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in fieldnames})
+    temporary.replace(path)
+
+
+@contextmanager
+def file_lock(path: Path):
+    """Kunci eksklusif antar-proses untuk baca-ubah-tulis sebuah file map."""
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def append_or_replace_map(path: Path, fieldnames: Sequence[str], key_fields: Sequence[str], new_rows: Sequence[Dict[str, Any]]) -> None:
-    existing = read_csv_rows(path)
-    by_key: Dict[Tuple[str, ...], Dict[str, Any]] = {}
-    for row in existing:
-        by_key[tuple(str(row.get(k, "")) for k in key_fields)] = row
-    for row in new_rows:
-        by_key[tuple(str(row.get(k, "")) for k in key_fields)] = row
-    write_csv(path, fieldnames, list(by_key.values()))
+    with file_lock(path):
+        existing = read_csv_rows(path)
+        by_key: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+        for row in existing:
+            by_key[tuple(str(row.get(k, "")) for k in key_fields)] = row
+        for row in new_rows:
+            by_key[tuple(str(row.get(k, "")) for k in key_fields)] = row
+        write_csv(path, fieldnames, list(by_key.values()))
+
+
+# Map yang kuncinya memuat ID kegiatan aman disalin ke pengguna baru: hanya cocok
+# jika kegiatannya memang sama. kegiatan_map (kunci: judul) sengaja tidak disalin
+# dan akan dicari ulang lewat API memakai akun pengguna sendiri.
+LEGACY_MAPS_TO_SEED = ("variabel_map.csv", "indikator_map.csv")
+
+
+def user_run_state_dir(username: Optional[str], root: Path = DEFAULT_RUN_STATE_DIR) -> Path:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", username or "").strip("._")
+    if not slug:
+        raise IndahError("Sesi login tidak memuat username. Login INDAH ulang.")
+    target = root / "users" / slug
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+        for name in LEGACY_MAPS_TO_SEED:
+            legacy = root / name
+            if legacy.exists():
+                shutil.copy2(legacy, target / name)
+    return target
 
 
 def _local_storage_value(storage_state: Dict[str, Any], name: str) -> Optional[str]:
@@ -404,7 +445,7 @@ class IndahClient:
     def __init__(self, token: str, base_url: str = BASE_API_URL):
         self.token = token
         self.base_url = base_url.rstrip("/")
-        self.context = ssl._create_unverified_context()
+        self.context = ssl.create_default_context()
 
     def request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, *, retry_server_errors: bool = True) -> Dict[str, Any]:
         url = self.base_url + path

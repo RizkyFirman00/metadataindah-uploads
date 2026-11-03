@@ -93,13 +93,14 @@ class SubmissionPeriodTest(unittest.TestCase):
         self.assertEqual(item["id"], 25)
 
     def test_ui_passes_selected_period_to_script(self):
-        command = build_phase_command(
-            "kegiatan",
-            {"script": "indah_kegiatan.py"},
-            Path("/tmp/prepared"),
-            FakeForm({"submission_period": "2025"}),
-            Path("/tmp/state.json"),
-        )
+        with patch("indah_ui.run_state_for", return_value=Path("/tmp/run_state/users/u")):
+            command = build_phase_command(
+                "kegiatan",
+                {"script": "indah_kegiatan.py"},
+                Path("/tmp/prepared"),
+                FakeForm({"submission_period": "2025"}),
+                Path("/tmp/state.json"),
+            )
         index = command.index("--submission-period")
         self.assertEqual(command[index + 1], "2025")
 

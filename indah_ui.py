@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import cgi
+import email.message
+import email.utils
+import hashlib
 import html
+import io
 import json
+import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -20,7 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from indah_automation.shared import BASE_API_URL, DEFAULT_RUN_STATE_DIR, IndahError, PROJECT_ROOT, clean, load_auth
+from indah_automation.shared import BASE_API_URL, IndahError, PROJECT_ROOT, clean, load_auth, user_run_state_dir
 from indah_automation.spreadsheet_io import (
     download_spreadsheet_url,
     prepare_phase_sources,
@@ -33,6 +38,28 @@ UI_RUNS_ROOT = PROJECT_ROOT / "ui_runs"
 UI_SESSION_ROOT = PROJECT_ROOT / ".indah_session" / "ui_sessions"
 SESSION_COOKIE = "indah_ui_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30
+MAX_REQUEST_BYTES = 25 * 1024 * 1024
+RUN_RETENTION_DAYS = int(os.environ.get("INDAH_RETENTION_DAYS", "90"))
+MAINTENANCE_INTERVAL_SECONDS = 6 * 60 * 60
+INTERRUPTED_MESSAGE = (
+    "Proses terputus karena aplikasi dimulai ulang. Sebagian data mungkin sudah tersimpan: "
+    "periksa hasil di INDAH sebelum mengulang upload."
+)
+# Pesan yang sudah ramah pengguna; ditampilkan apa adanya oleh friendly_error.
+USER_FACING_PREFIXES = (
+    "Hasil penyimpanan belum terverifikasi:",
+    "Hanya link Google Sheets",
+    "Ukuran ",
+    "Isi file Excel terlalu besar",
+    "Isi judul atau nomor kegiatan",
+    "Nomor kegiatan harus",
+    "Batas jumlah data harus",
+    "Proses terputus",
+    "Sesi login",
+    "File Excel rusak",
+    "Format file belum didukung",
+    "File .xls lama",
+)
 
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="icon-title icon-desc">
   <title id="icon-title">INDAH Metadata Upload</title>
@@ -92,12 +119,12 @@ class IndahUIHandler(BaseHTTPRequestHandler):
         if parsed.path == "/run":
             query = parse_qs(parsed.query)
             run_id = (query.get("id") or [""])[0]
-            self.respond_html(render_saved_run(run_id))
+            self.respond_html(render_saved_run(run_id, session_owner(session_id)))
             return
         if parsed.path == "/run-status":
             query = parse_qs(parsed.query)
             run_id = (query.get("id") or [""])[0]
-            self.respond_json(run_status(run_id))
+            self.respond_json(run_status(run_id, session_owner(session_id)))
             return
         self.send_error(404)
 
@@ -105,6 +132,10 @@ class IndahUIHandler(BaseHTTPRequestHandler):
         session_id = self.user_session_id()
         state_path = user_state_path(session_id)
         parsed = urlparse(self.path)
+        if request_too_large(self.headers):
+            self.close_connection = True
+            self.respond_html(render_error("-", f"Ukuran unggahan melebihi batas {MAX_REQUEST_BYTES // (1024 * 1024)} MB."), status=413)
+            return
         if parsed.path == "/login":
             self.respond_html(handle_web_login(self, state_path))
             return
@@ -538,19 +569,19 @@ def render_cleanup_panel() -> str:
     <div class="grid">
       <label class="field">
         <span>Judul kegiatan</span>
-        <input type="text" name="cleanup_title" placeholder="Kosongkan untuk pakai kegiatan_map.csv">
-        <small>Semua variabel atau indikator dari kegiatan ini akan dihapus. Jika judul dan nomor kegiatan kosong, penghapusan berlaku untuk semua kegiatan yang tercatat di aplikasi.</small>
+        <input type="text" name="cleanup_title" placeholder="Judul persis seperti di INDAH">
+        <small>Semua variabel atau indikator dari kegiatan ini akan dihapus. Isi judul atau nomor kegiatan, minimal salah satu.</small>
       </label>
       <label class="field">
         <span>Nomor kegiatan di INDAH</span>
-        <input type="text" name="cleanup_ms_keg_id" placeholder="Opsional">
-        <small>Isi jika ingin target ID kegiatan tertentu.</small>
+        <input type="text" name="cleanup_ms_keg_id" inputmode="numeric" placeholder="Contoh: 104286">
+        <small>Lebih tepat daripada judul jika ada beberapa kegiatan bernama mirip.</small>
       </label>
     </div>
     <div class="cleanup-actions" style="margin-top: 14px;">
-      <button class="danger" type="submit" formaction="/cleanup/variabel" data-loading-label="Menghapus variabel" data-confirm="Hapus seluruh variabel dari kegiatan yang dipilih? Jika judul dan nomor kegiatan kosong, seluruh kegiatan yang tercatat akan diproses.">Hapus variabel</button>
-      <button class="danger" type="submit" formaction="/cleanup/indikator" data-loading-label="Menghapus indikator" data-confirm="Hapus seluruh indikator dari kegiatan yang dipilih? Jika judul dan nomor kegiatan kosong, seluruh kegiatan yang tercatat akan diproses.">Hapus indikator</button>
-      <button class="danger" type="submit" formaction="/cleanup/all" data-loading-label="Menghapus variabel dan indikator" data-confirm="Hapus seluruh variabel dan indikator dari kegiatan yang dipilih? Jika judul dan nomor kegiatan kosong, seluruh kegiatan yang tercatat akan diproses.">Hapus keduanya</button>
+      <button class="danger" type="submit" formaction="/cleanup/variabel" data-loading-label="Menghapus variabel" data-confirm="Hapus seluruh variabel dari kegiatan yang dipilih?">Hapus variabel</button>
+      <button class="danger" type="submit" formaction="/cleanup/indikator" data-loading-label="Menghapus indikator" data-confirm="Hapus seluruh indikator dari kegiatan yang dipilih?">Hapus indikator</button>
+      <button class="danger" type="submit" formaction="/cleanup/all" data-loading-label="Menghapus variabel dan indikator" data-confirm="Hapus seluruh variabel dan indikator dari kegiatan yang dipilih?">Hapus keduanya</button>
     </div>
   </form>
 </section>
@@ -703,6 +734,78 @@ def save_user_state(state_path: Path, response: Dict[str, object]) -> None:
     temporary_path.replace(state_path)
 
 
+def session_owner(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+
+
+def write_run_owner(run_dir: Path, state_path: Path) -> None:
+    (run_dir / "owner").write_text(session_owner(state_path.stem), encoding="utf-8")
+
+
+def run_owned_by(run_dir: Path, owner: str) -> bool:
+    try:
+        stored = (run_dir / "owner").read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return secrets.compare_digest(stored, owner)
+
+
+def run_state_for(state_path: Path) -> Path:
+    try:
+        auth = load_auth(state_path)
+    except (IndahError, OSError, ValueError):
+        raise IndahError("Sesi login belum ada atau sudah berakhir. Login INDAH dulu, lalu coba kembali.") from None
+    return user_run_state_dir(auth.user_payload.get("username") or auth.user_raw.get("username"))
+
+
+def mark_interrupted_runs() -> int:
+    """Run yang masih 'berjalan' saat aplikasi start pasti terputus oleh restart."""
+    marked = 0
+    if not UI_RUNS_ROOT.exists():
+        return marked
+    for run_dir in UI_RUNS_ROOT.iterdir():
+        if not run_dir.is_dir() or (run_dir / "error.txt").exists() or (run_dir / "done").exists():
+            continue
+        try:
+            summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if summary.get("returncode") is None:
+            (run_dir / "error.txt").write_text(INTERRUPTED_MESSAGE, encoding="utf-8")
+            marked += 1
+    return marked
+
+
+def prune_old_data(now: Optional[float] = None) -> Dict[str, int]:
+    now = time.time() if now is None else now
+    removed = {"sessions": 0, "runs": 0, "uploads": 0}
+    if UI_SESSION_ROOT.exists():
+        for session_file in UI_SESSION_ROOT.glob("*.json"):
+            if now - session_file.stat().st_mtime > SESSION_MAX_AGE:
+                session_file.unlink(missing_ok=True)
+                removed["sessions"] += 1
+    cutoff = now - RUN_RETENTION_DAYS * 24 * 60 * 60
+    for key, root in (("runs", UI_RUNS_ROOT), ("uploads", UPLOAD_ROOT)):
+        if not root.exists():
+            continue
+        for entry in root.iterdir():
+            if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+                removed[key] += 1
+    return removed
+
+
+def maintenance_loop() -> None:
+    while True:
+        try:
+            removed = prune_old_data()
+            if any(removed.values()):
+                print(f"Pembersihan data lama: {removed}")
+        except Exception as exc:
+            print(f"Pembersihan data lama gagal: {exc}")
+        time.sleep(MAINTENANCE_INTERVAL_SECONDS)
+
+
 def user_state_path(session_id: str) -> Path:
     return UI_SESSION_ROOT / f"{session_id}.json"
 
@@ -726,6 +829,7 @@ def handle_phase_run(phase: str, handler: BaseHTTPRequestHandler, state_path: Pa
     prepared_dir = UPLOAD_ROOT / run_id / "prepared"
     raw_dir.mkdir(parents=True, exist_ok=True)
     run_dir.mkdir(parents=True, exist_ok=True)
+    write_run_owner(run_dir, state_path)
 
     try:
         form = parse_multipart(handler)
@@ -771,51 +875,135 @@ def handle_cleanup_run(target: str, handler: BaseHTTPRequestHandler, state_path:
     run_id = f"cleanup-{target}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = UI_RUNS_ROOT / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    form = parse_multipart(handler)
-    cleanup_title = form_text(form, "cleanup_title")
-    cleanup_ms_keg_id = form_text(form, "cleanup_ms_keg_id")
-    command = [
-        sys.executable,
-        str(PROJECT_ROOT / "indah_cleanup.py"),
-        "--phase",
-        target,
-        "--state",
-        str(state_path),
-        "--run-state",
-        str(DEFAULT_RUN_STATE_DIR),
-        "--execute",
-    ]
-    if cleanup_title:
-        command.extend(["--title", cleanup_title])
-    if cleanup_ms_keg_id:
-        command.extend(["--ms-keg-id", cleanup_ms_keg_id])
-    if not cleanup_title and not cleanup_ms_keg_id:
-        command.append("--from-kegiatan-map")
-    result = subprocess.run(
-        command,
-        cwd=str(PROJECT_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=3600,
-    )
-    save_run_artifacts(run_dir, run_id, command, {}, result)
-    title = "Cleanup Phase 2 dan 3" if target == "all" else f"Cleanup {target}"
-    return render_run_result(run_id, title, {}, command, result.returncode, result.stdout, result.stderr)
+    write_run_owner(run_dir, state_path)
+    try:
+        form = parse_multipart(handler)
+        cleanup_title = form_text(form, "cleanup_title")
+        cleanup_ms_keg_id = form_text(form, "cleanup_ms_keg_id")
+        if not cleanup_title and not cleanup_ms_keg_id:
+            raise IndahError("Isi judul atau nomor kegiatan yang datanya mau dihapus.")
+        if cleanup_ms_keg_id and not cleanup_ms_keg_id.isdigit():
+            raise IndahError("Nomor kegiatan harus berupa angka.")
+        command = [
+            sys.executable,
+            "-u",
+            str(PROJECT_ROOT / "indah_cleanup.py"),
+            "--phase",
+            target,
+            "--state",
+            str(state_path),
+            "--run-state",
+            str(run_state_for(state_path)),
+            "--execute",
+        ]
+        if cleanup_title:
+            command.extend(["--title", cleanup_title])
+        if cleanup_ms_keg_id:
+            command.extend(["--ms-keg-id", cleanup_ms_keg_id])
+        (run_dir / "summary.json").write_text(
+            json.dumps({"run_id": run_id, "command": command, "returncode": None, "prepared": {}}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        thread = threading.Thread(
+            target=run_phase_background,
+            args=(run_id, "cleanup", {}, command, run_dir),
+            daemon=True,
+        )
+        thread.start()
+        return render_run_progress(run_id, "cleanup")
+    except Exception as exc:
+        (run_dir / "error.txt").write_text(str(exc), encoding="utf-8")
+        return render_error(run_id, str(exc))
 
 
-def parse_multipart(handler: BaseHTTPRequestHandler) -> cgi.FieldStorage:
-    return cgi.FieldStorage(
-        fp=handler.rfile,
-        headers=handler.headers,
-        environ={
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": handler.headers.get("Content-Type", ""),
-            "CONTENT_LENGTH": handler.headers.get("Content-Length", "0"),
-        },
-    )
+class UploadedFile:
+    def __init__(self, name: str, filename: str, data: bytes):
+        self.name = name
+        self.filename = filename
+        self.file = io.BytesIO(data)
 
 
-def save_specific_files(form: cgi.FieldStorage, raw_dir: Path, slugs: List[str]) -> Dict[str, Path]:
+class FormData:
+    """Parser form minimal pengganti FieldStorage (modul lama itu dihapus di Python 3.13)."""
+
+    def __init__(self) -> None:
+        self._fields: Dict[str, List[object]] = {}
+
+    def add(self, name: str, value: object) -> None:
+        self._fields.setdefault(name, []).append(value)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._fields
+
+    def __getitem__(self, name: str) -> object:
+        values = self._fields[name]
+        return values if len(values) > 1 else values[0]
+
+    def getfirst(self, name: str, default: object = None) -> object:
+        for value in self._fields.get(name, []):
+            if isinstance(value, str):
+                return value
+        return default
+
+
+def request_too_large(headers) -> bool:
+    try:
+        return int(headers.get("Content-Length") or 0) > MAX_REQUEST_BYTES
+    except ValueError:
+        return True
+
+
+def parse_multipart(handler: BaseHTTPRequestHandler) -> FormData:
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError:
+        raise IndahError("Permintaan tidak valid.") from None
+    if length < 0:
+        raise IndahError("Permintaan tidak valid.")
+    if length > MAX_REQUEST_BYTES:
+        raise IndahError(f"Ukuran unggahan melebihi batas {MAX_REQUEST_BYTES // (1024 * 1024)} MB.")
+    body = handler.rfile.read(length) if length else b""
+    return parse_form_body(handler.headers.get("Content-Type", ""), body)
+
+
+def parse_form_body(content_type: str, body: bytes) -> FormData:
+    form = FormData()
+    if not content_type.lower().startswith("multipart/form-data"):
+        for name, values in parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True).items():
+            for value in values:
+                form.add(name, value)
+        return form
+
+    header = email.message.Message()
+    header["Content-Type"] = content_type
+    boundary = header.get_boundary()
+    if not boundary:
+        raise IndahError("Form upload tidak valid.")
+    delimiter = b"--" + boundary.encode("latin-1")
+    for section in body.split(delimiter)[1:]:
+        if section.startswith(b"--"):
+            break
+        if section.startswith(b"\r\n"):
+            section = section[2:]
+        raw_headers, separator, content = section.partition(b"\r\n\r\n")
+        if not separator:
+            continue
+        if content.endswith(b"\r\n"):
+            content = content[:-2]
+        part = email.message_from_string(raw_headers.decode("utf-8", errors="replace") + "\r\n\r\n")
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        name = email.utils.collapse_rfc2231_value(name)
+        filename = part.get_filename()
+        if filename is not None:
+            form.add(name, UploadedFile(name, filename, content))
+        else:
+            form.add(name, content.decode(part.get_content_charset() or "utf-8", errors="replace"))
+    return form
+
+
+def save_specific_files(form: FormData, raw_dir: Path, slugs: List[str]) -> Dict[str, Path]:
     files: Dict[str, Path] = {}
     for slug in slugs:
         item = first_file_item(form, f"file_{slug}")
@@ -828,7 +1016,7 @@ def save_specific_files(form: cgi.FieldStorage, raw_dir: Path, slugs: List[str])
     return files
 
 
-def save_workbook_files(form: cgi.FieldStorage, raw_dir: Path) -> List[Path]:
+def save_workbook_files(form: FormData, raw_dir: Path) -> List[Path]:
     item = first_file_item(form, "workbook_file")
     if item is None:
         return []
@@ -838,7 +1026,7 @@ def save_workbook_files(form: cgi.FieldStorage, raw_dir: Path) -> List[Path]:
     return [path]
 
 
-def first_file_item(form: cgi.FieldStorage, name: str) -> Optional[cgi.FieldStorage]:
+def first_file_item(form: FormData, name: str) -> Optional[UploadedFile]:
     if name not in form:
         return None
     value = form[name]
@@ -849,16 +1037,16 @@ def first_file_item(form: cgi.FieldStorage, name: str) -> Optional[cgi.FieldStor
     return None
 
 
-def form_text(form: cgi.FieldStorage, name: str) -> str:
+def form_text(form: FormData, name: str) -> str:
     value = form.getfirst(name, "")
-    return clean(value) or ""
+    return clean(value if isinstance(value, str) else "") or ""
 
 
 def build_phase_command(
     phase: str,
     config: Dict[str, object],
     prepared_dir: Path,
-    form: cgi.FieldStorage,
+    form: FormData,
     state_path: Path,
 ) -> List[str]:
     command = [
@@ -870,7 +1058,7 @@ def build_phase_command(
         "--state",
         str(state_path),
         "--run-state",
-        str(DEFAULT_RUN_STATE_DIR),
+        str(run_state_for(state_path)),
     ]
     only_title = form_text(form, "only_title")
     limit = form_text(form, "limit")
@@ -884,8 +1072,10 @@ def build_phase_command(
     command.extend(["--submission-period", str(submission_period_year)])
     if only_title:
         command.extend(["--only-title", only_title])
-    if limit and limit != "0":
-        command.extend(["--limit", limit])
+    if limit and not limit.isdigit():
+        raise IndahError("Batas jumlah data harus berupa angka bulat.")
+    if limit and int(limit) > 0:
+        command.extend(["--limit", str(int(limit))])
     if form.getfirst("submit") or form.getfirst("final_submit"):
         command.append("--submit")
     if form.getfirst("final_submit"):
@@ -963,7 +1153,7 @@ def save_run_artifacts(
 
 def friendly_error(message: str) -> str:
     text = message.lower()
-    if message.startswith("Hasil penyimpanan belum terverifikasi:"):
+    if message.startswith(USER_FACING_PREFIXES):
         return message
     if "belum dipilih" in text:
         return "File Excel belum dipilih. Pilih file Excel berisi sheet sesuai template, lalu coba kembali."
@@ -1054,10 +1244,10 @@ def upload_summary(stdout: str, stderr: str, returncode=None, error: str = "") -
             "output": "\n".join([last_line] + list(dict.fromkeys(issues)))}
 
 
-def run_status(run_id: str) -> Dict[str, object]:
+def run_status(run_id: str, owner: str) -> Dict[str, object]:
     safe_id = safe_filename(run_id)
     run_dir = UI_RUNS_ROOT / safe_id
-    if not safe_id or not run_dir.exists():
+    if not safe_id or not run_dir.is_dir() or not run_owned_by(run_dir, owner):
         return {"done": True, "percent": 100, "output": "Run tidak ditemukan.", "last_line": "Run tidak ditemukan."}
     stdout = (run_dir / "stdout.txt").read_text(encoding="utf-8") if (run_dir / "stdout.txt").exists() else ""
     stderr = (run_dir / "stderr.txt").read_text(encoding="utf-8") if (run_dir / "stderr.txt").exists() else ""
@@ -1072,13 +1262,13 @@ def run_status(run_id: str) -> Dict[str, object]:
 
 
 def render_run_progress(run_id: str, phase: str) -> str:
-    phase_title = str(PHASES.get(phase, {}).get("title", phase))
+    heading = f"Upload {PHASES[phase]['title']} berjalan" if phase in PHASES else "Penghapusan data berjalan"
     body = f"""
 <section class="band result">
-  <h2>Upload {escape(phase_title)} berjalan</h2>
+  <h2>{escape(heading)}</h2>
   <div class="meta-list">
 <div><span>Nomor proses</span><span>{escape(run_id)}</span></div>
-    <div><span>Status</span><span class="warn">Memproses upload ke BPS INDAH</span></div>
+    <div><span>Status</span><span class="warn">Memproses di BPS INDAH</span></div>
   </div>
   <p>Persentase menunjukkan data yang selesai diproses, termasuk data yang gagal atau dilewati.</p>
   <div class="progress-track"><div class="progress-bar" style="width: 0%;"></div></div>
@@ -1145,16 +1335,19 @@ def render_error(run_id: str, message: str) -> str:
     return page("Error", body)
 
 
-def render_saved_run(run_id: str) -> str:
+def render_saved_run(run_id: str, owner: str) -> str:
     safe_id = safe_filename(run_id)
     run_dir = UI_RUNS_ROOT / safe_id
-    if not safe_id or not run_dir.exists():
+    if not safe_id or not run_dir.is_dir() or not run_owned_by(run_dir, owner):
         return render_error(safe_id or "-", "Run tidak ditemukan.")
     error_path = run_dir / "error.txt"
     if error_path.exists():
-        result = run_status(safe_id)
+        result = run_status(safe_id, owner)
         return page("Proses terhenti", f'<section class="band result"><h2>Proses terhenti</h2><p>Nomor proses: {escape(safe_id)}</p><div class="progress-output">{escape(result["output"])}</div><a class="button secondary" href="/">Kembali</a></section>')
-    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    try:
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return render_error(safe_id, "Run tidak ditemukan.")
     if summary.get("returncode") is None:
         phase = safe_id.split("-", 1)[0]
         return render_run_progress(safe_id, phase)
@@ -1197,6 +1390,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
+    interrupted = mark_interrupted_runs()
+    if interrupted:
+        print(f"{interrupted} proses yang terputus oleh restart ditandai.")
+    threading.Thread(target=maintenance_loop, daemon=True).start()
     port = find_available_port(args.host, args.port)
     server = ThreadingHTTPServer((args.host, port), IndahUIHandler)
     print(f"INDAH UI aktif: http://{args.host}:{port}")
