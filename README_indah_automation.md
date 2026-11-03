@@ -4,9 +4,8 @@ Automation tersedia lewat UI lokal dan script phase terpisah.
 
 ## Login dari UI Web
 
-Buka UI, klik **Login INDAH**, lalu masukkan akun INDAH dan kode captcha yang
-ditampilkan. Captcha dibuat serta diperiksa di browser, mengikuti perilaku UI
-resmi INDAH. Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.
+Buka UI, klik **Login INDAH**, lalu masukkan username dan password akun INDAH.
+Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.
 
 Setiap browser mendapat file session terpisah di `.indah_session/ui_sessions/`,
 sehingga proses upload dan cleanup memakai akun browser tersebut dan tidak

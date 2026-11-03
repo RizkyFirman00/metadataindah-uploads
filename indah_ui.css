@@ -93,20 +93,11 @@ button:disabled { cursor: wait; opacity: .7; }
 .login-card form { margin-top: 20px; display: grid; gap: 20px; }
 .login-card .field input { height: 44px; min-height: 44px; padding: 9px 12px; line-height: 24px; }
 .login-error { margin-top: 12px; padding: 10px 12px; background: #fff3f1; color: var(--red); border-radius: 6px; font-size: 13px; }
-.login-captcha { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
-.captcha-label { font-size: 14px; font-weight: 650; }
-.captcha-preview { display: grid; grid-template-columns: minmax(0, 180px) auto; gap: 12px; justify-content: start; align-items: center; }
-.captcha-preview canvas { display: block; width: 100%; height: auto; aspect-ratio: 18 / 5; border: 1px solid var(--line); border-radius: 6px; background: #f8fafc; }
-.captcha-preview button { padding: 8px 10px; font-size: 13px; }
-.login-captcha .captcha-error:empty { display: none; }
 .login-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
 .login-actions > * { height: 44px; min-height: 44px; margin: 0; padding: 9px 12px; line-height: 24px; }
 .password-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .login-card .icon-button { width: 44px; height: 44px; min-width: 44px; padding: 10px; }
 .icon-button svg { display: block; width: 22px; height: 22px; }
-.captcha-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 20px; align-items: start; }
-.captcha-box { display: grid; gap: 8px; font-size: 13px; }
-.captcha-box canvas { width: 180px; height: 50px; border: 1px solid var(--line); border-radius: 7px; background: #f8fafc; cursor: pointer; }
 .captcha-error { color: var(--red); font-size: 13px; min-height: 20px; }
 .result { display: grid; gap: 20px; max-width: 880px; margin: 0 auto; }
 .result p { margin-bottom: 0; }
@@ -147,7 +138,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .topline { gap: 10px; }
   .topline .button { padding: 9px 12px; font-size: 12px; }
   .band { padding: 22px 18px; }
-  .grid, .captcha-row { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: 1fr; }
   .phase-link { display: grid; justify-items: start; }
   .phase-link strong { font-size: 12px; }
   .source-options { display: grid; }

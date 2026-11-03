@@ -217,8 +217,6 @@ def page(title: str, body: str) -> str:
       var subtitle = document.querySelector(".loading-subtitle");
       var progressBars = document.querySelectorAll(".progress-bar");
       var progressOutputs = document.querySelectorAll(".progress-output");
-      var captchaCanvas = document.querySelector("#login-captcha-canvas");
-      var captchaCode = "";
       var passwordInput = document.querySelector("#login-password");
       var passwordToggle = document.querySelector("#toggle-password");
       if (passwordInput && passwordToggle) {{
@@ -248,58 +246,6 @@ def page(title: str, body: str) -> str:
         }});
         selectSource();
       }});
-
-      function randomIndex(max) {{
-        if (window.crypto && window.crypto.getRandomValues) {{
-          var value = new Uint32Array(1);
-          window.crypto.getRandomValues(value);
-          return value[0] % max;
-        }}
-        return Math.floor(Math.random() * max);
-      }}
-
-      function createCaptcha() {{
-        if (!captchaCanvas) return;
-        var characters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ@!#$%^&*";
-        var code = [];
-        while (code.length < 7) {{
-          var character = characters[randomIndex(characters.length)];
-          if (code.indexOf(character) === -1) code.push(character);
-        }}
-        captchaCode = code.join("");
-
-        var context = captchaCanvas.getContext("2d");
-        context.clearRect(0, 0, captchaCanvas.width, captchaCanvas.height);
-        context.fillStyle = "#f8fafc";
-        context.fillRect(0, 0, captchaCanvas.width, captchaCanvas.height);
-        for (var line = 0; line < 6; line += 1) {{
-          context.strokeStyle = ["#94a3b8", "#cbd5e1", "#7dd3fc"][randomIndex(3)];
-          context.beginPath();
-          context.moveTo(randomIndex(captchaCanvas.width), randomIndex(captchaCanvas.height));
-          context.lineTo(randomIndex(captchaCanvas.width), randomIndex(captchaCanvas.height));
-          context.stroke();
-        }}
-        context.font = "30px Georgia";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        for (var index = 0; index < code.length; index += 1) {{
-          context.save();
-          context.translate(26 + index * 21, 25);
-          context.rotate((randomIndex(17) - 8) * Math.PI / 180);
-          context.fillStyle = ["#b42318", "#0d7c66", "#1e5aa8", "#8a5b00"][randomIndex(4)];
-          context.fillText(code[index], 0, 0);
-          context.restore();
-        }}
-        var captchaInput = document.querySelector("#login-captcha-input");
-        if (captchaInput) captchaInput.value = "";
-      }}
-
-      if (captchaCanvas) {{
-        captchaCanvas.addEventListener("click", createCaptcha);
-        var captchaRefresh = document.querySelector("#refresh-captcha");
-        if (captchaRefresh) captchaRefresh.addEventListener("click", createCaptcha);
-        createCaptcha();
-      }}
 
       function updateProgress(runId) {{
         if (!runId || !subtitle) return;
@@ -339,18 +285,6 @@ def page(title: str, body: str) -> str:
             (requiredFile || url).focus();
             return;
           }}
-        }}
-        if (form.id === "indah-login-form") {{
-          var captchaInput = document.querySelector("#login-captcha-input");
-          var captchaError = document.querySelector("#login-captcha-error");
-          if (!captchaInput || captchaInput.value !== captchaCode) {{
-            event.preventDefault();
-            if (captchaError) captchaError.textContent = "Kode captcha tidak sesuai.";
-            createCaptcha();
-            if (captchaInput) captchaInput.focus();
-            return;
-          }}
-          if (captchaError) captchaError.textContent = "";
         }}
         var confirmText = event.submitter && event.submitter.getAttribute("data-confirm")
           ? event.submitter.getAttribute("data-confirm")
@@ -614,18 +548,6 @@ def render_login_form(state_path: Path, error: str = "") -> str:
         </div>
         <small>Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.</small>
       </div>
-    </div>
-    <div class="login-captcha">
-      <span class="captcha-label">Kode verifikasi</span>
-      <div class="captcha-preview">
-        <canvas id="login-captcha-canvas" width="180" height="50" title="Kode verifikasi"></canvas>
-        <button class="secondary icon-button" id="refresh-captcha" type="button" aria-label="Ganti kode captcha" title="Ganti kode captcha"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 7a7.5 7.5 0 0 1 12-1L20 9M4 15l2.5 3a7.5 7.5 0 0 0 12-1"/></svg></button>
-      </div>
-      <label class="field">
-        <span>Masukkan kode pada gambar</span>
-        <input id="login-captcha-input" type="text" name="captcha" autocomplete="off" autocapitalize="off" spellcheck="false" required>
-        <span id="login-captcha-error" class="captcha-error" aria-live="polite"></span>
-      </label>
     </div>
     <div class="login-actions">
       <button type="submit">Login</button>
