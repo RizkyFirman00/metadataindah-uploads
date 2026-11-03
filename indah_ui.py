@@ -17,6 +17,8 @@ import sys
 import threading
 import time
 import uuid
+import zipfile
+from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,7 +27,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from indah_automation.shared import BASE_API_URL, IndahError, PROJECT_ROOT, clean, load_auth, user_run_state_dir
+from indah_automation.shared import BASE_API_URL, WEB_URL, IndahError, PROJECT_ROOT, clean, load_auth, user_run_state_dir
 from indah_automation.spreadsheet_io import (
     download_spreadsheet_url,
     prepare_phase_sources,
@@ -34,6 +36,9 @@ from indah_automation.spreadsheet_io import (
 
 
 UPLOAD_ROOT = PROJECT_ROOT / "ui_uploads"
+TEMPLATE_DIR = PROJECT_ROOT / "indah_metadata_csv_templates"
+WIB = timezone(timedelta(hours=7))
+REQUEST = threading.local()
 UI_RUNS_ROOT = PROJECT_ROOT / "ui_runs"
 UI_SESSION_ROOT = PROJECT_ROOT / ".indah_session" / "ui_sessions"
 SESSION_COOKIE = "indah_ui_session"
@@ -64,7 +69,7 @@ USER_FACING_PREFIXES = (
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="icon-title icon-desc">
   <title id="icon-title">INDAH Metadata Upload</title>
   <desc id="icon-desc">Spreadsheet dengan panah upload</desc>
-  <rect width="64" height="64" rx="12" fill="#1e5aa8"/>
+  <rect width="64" height="64" rx="12" fill="#101014"/>
   <path d="M15 13h25l9 9v29H15z" fill="#ffffff"/>
   <path d="M40 13v10h9" fill="#dceafa"/>
   <path d="M21 29h22M21 36h22M21 43h13" fill="none" stroke="#91a4b7" stroke-width="3" stroke-linecap="round"/>
@@ -105,7 +110,17 @@ class IndahUIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         session_id = self.user_session_id()
         state_path = user_state_path(session_id)
+        REQUEST.user = session_display_name(state_path)
         parsed = urlparse(self.path)
+        if parsed.path == "/riwayat":
+            self.respond_html(render_history(session_owner(session_id)))
+            return
+        if parsed.path == "/hapus":
+            self.respond_html(render_cleanup_page())
+            return
+        if parsed.path == "/template.zip":
+            self.respond_bytes(template_zip(), "application/zip", "template-metadata-indah.zip")
+            return
         if parsed.path == "/favicon.svg":
             self.respond_svg(ICON_SVG)
             return
@@ -131,7 +146,12 @@ class IndahUIHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         session_id = self.user_session_id()
         state_path = user_state_path(session_id)
+        REQUEST.user = session_display_name(state_path)
         parsed = urlparse(self.path)
+        if parsed.path == "/keluar":
+            state_path.unlink(missing_ok=True)
+            self.respond_redirect("/login")
+            return
         if request_too_large(self.headers):
             self.close_connection = True
             self.respond_html(render_error("-", f"Ukuran unggahan melebihi batas {MAX_REQUEST_BYTES // (1024 * 1024)} MB."), status=413)
@@ -175,6 +195,22 @@ class IndahUIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def respond_bytes(self, content: bytes, content_type: str, filename: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def respond_redirect(self, location: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        if getattr(self, "_new_session_cookie", None):
+            self.send_header("Set-Cookie", self._new_session_cookie)
+        self.end_headers()
+
     def respond_svg(self, content: str, status: int = 200) -> None:
         encoded = content.encode("utf-8")
         self.send_response(status)
@@ -201,362 +237,422 @@ class IndahUIHandler(BaseHTTPRequestHandler):
         print(f"{self.address_string()} - {format % args}")
 
 
+ICON_UPLOAD = '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m-5 5 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>'
+ICON_MARK = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"><path d="M12 17V4m-6 6 6-6 6 6"/><path d="M4 20h16"/></svg>'
+ICON_MOON = '<svg class="icon-moon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/></svg>'
+ICON_SUN = '<svg class="icon-sun" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+ICON_CLOSE = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+ICON_EYE = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>'
+ICON_WARN = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>'
+ICON_CHECK = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>'
+
+PHASE_INFO = {
+    "kegiatan": ("Kegiatan", "Identitas dan pelaksanaan kegiatan"),
+    "variabel": ("Variabel", "Data yang dikumpulkan"),
+    "indikator": ("Indikator", "Ukuran hasil kegiatan"),
+}
+
+THEME_BOOT = """<script>(function(){try{if(localStorage.getItem('indah-theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();</script>"""
+
+PAGE_SCRIPT = r"""<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var root = document.documentElement;
+  document.querySelectorAll(".theme-toggle").forEach(function (button) {
+    function sync() {
+      var dark = root.getAttribute("data-theme") === "dark";
+      var label = dark ? "Ganti ke tema terang" : "Ganti ke tema gelap";
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    }
+    sync();
+    button.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") !== "dark";
+      if (dark) { root.setAttribute("data-theme", "dark"); } else { root.removeAttribute("data-theme"); }
+      try { localStorage.setItem("indah-theme", dark ? "dark" : "light"); } catch (e) {}
+      sync();
+    });
+  });
+
+  var overlay = document.querySelector(".overlay");
+  var overlayText = document.querySelector(".overlay-text");
+  function busy(form, label) {
+    if (overlayText) overlayText.textContent = label || "Memproses...";
+    if (overlay) overlay.classList.add("is-visible");
+    form.querySelectorAll("button").forEach(function (b) { b.disabled = true; });
+  }
+
+  var form = document.getElementById("upload-form");
+  if (form) {
+    var sourceMode = document.getElementById("source-mode");
+    var drop = document.getElementById("drop");
+    var fileInput = document.getElementById("workbook");
+    var fileName = document.getElementById("file-name");
+    var useLink = document.getElementById("use-link");
+    var linkBox = document.getElementById("link-box");
+    var urlInput = document.getElementById("sheet-url");
+    var cancelLink = document.getElementById("cancel-link");
+    var sheetName = document.getElementById("sheet-name");
+    var error = document.getElementById("form-error");
+
+    form.querySelectorAll('input[name="phase_choice"]').forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        form.action = "/phase/" + radio.value;
+        if (sheetName) sheetName.textContent = radio.getAttribute("data-sheet");
+        try { history.replaceState(null, "", "/?phase=" + radio.value); } catch (e) {}
+      });
+    });
+
+    function setLinkMode(on) {
+      sourceMode.value = on ? "url" : "workbook";
+      drop.classList.toggle("is-disabled", on);
+      drop.setAttribute("aria-disabled", on ? "true" : "false");
+      fileInput.disabled = on;
+      urlInput.disabled = !on;
+      linkBox.hidden = !on;
+      useLink.hidden = on;
+      if (error) error.hidden = true;
+      if (on) urlInput.focus(); else useLink.focus();
+    }
+    useLink.addEventListener("click", function () { setLinkMode(true); });
+    cancelLink.addEventListener("click", function () { setLinkMode(false); });
+
+    function showFile() {
+      fileName.textContent = fileInput.files.length ? "File dipilih: " + fileInput.files[0].name : "";
+    }
+    fileInput.addEventListener("change", showFile);
+    ["dragenter", "dragover"].forEach(function (name) {
+      drop.addEventListener(name, function (event) { event.preventDefault(); drop.classList.add("is-over"); });
+    });
+    ["dragleave", "drop"].forEach(function (name) {
+      drop.addEventListener(name, function () { drop.classList.remove("is-over"); });
+    });
+    drop.addEventListener("drop", function (event) {
+      event.preventDefault();
+      if (event.dataTransfer && event.dataTransfer.files.length) {
+        fileInput.files = event.dataTransfer.files;
+        showFile();
+      }
+    });
+
+    form.addEventListener("submit", function (event) {
+      var linkMode = sourceMode.value === "url";
+      var missing = linkMode ? !urlInput.value.trim() : !fileInput.files.length;
+      if (missing) {
+        event.preventDefault();
+        error.querySelector("span").textContent = linkMode
+          ? "Masukkan link Google Sheets terlebih dahulu."
+          : "Pilih file Excel terlebih dahulu.";
+        error.hidden = false;
+        (linkMode ? urlInput : fileInput).focus();
+        return;
+      }
+      var submitter = event.submitter;
+      var confirmText = submitter && submitter.getAttribute("data-confirm");
+      if (confirmText && !window.confirm(confirmText)) { event.preventDefault(); return; }
+      if (submitter && submitter.name) {
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = submitter.name;
+        hidden.value = submitter.value || "1";
+        form.appendChild(hidden);
+      }
+      busy(form, submitter && submitter.getAttribute("data-busy"));
+    });
+  }
+
+  document.querySelectorAll("form[data-busy-form]").forEach(function (other) {
+    other.addEventListener("submit", function (event) {
+      var submitter = event.submitter;
+      var confirmText = submitter && submitter.getAttribute("data-confirm");
+      if (confirmText && !window.confirm(confirmText)) { event.preventDefault(); return; }
+      if (submitter && submitter.getAttribute("formaction")) other.action = submitter.getAttribute("formaction");
+      busy(other, submitter && submitter.getAttribute("data-busy"));
+    });
+  });
+
+  var toggle = document.getElementById("toggle-password");
+  var password = document.getElementById("login-password");
+  if (toggle && password) {
+    toggle.addEventListener("click", function () {
+      var show = password.type === "password";
+      password.type = show ? "text" : "password";
+      toggle.setAttribute("aria-pressed", String(show));
+      toggle.setAttribute("aria-label", show ? "Sembunyikan password" : "Lihat password");
+    });
+  }
+
+  var progress = document.getElementById("progress");
+  if (progress) {
+    var runId = progress.getAttribute("data-run-id");
+    var bar = document.getElementById("bar");
+    var pct = document.getElementById("pct");
+    var label = document.getElementById("progress-label");
+    var log = document.getElementById("progress-log");
+    function poll() {
+      fetch("/run-status?id=" + encodeURIComponent(runId), {cache: "no-store"})
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var value = data.percent || 0;
+          bar.style.width = value + "%";
+          pct.textContent = value + "%";
+          label.textContent = (data.last_line || "Menyiapkan proses...").split("\n")[0];
+          log.textContent = data.output || "Menyiapkan proses...";
+          if (data.done) { window.location.href = "/run?id=" + encodeURIComponent(runId); }
+        })
+        .catch(function () { label.textContent = "Menunggu respons proses..."; });
+    }
+    poll();
+    window.setInterval(poll, 1200);
+  }
+});
+</script>"""
+
+
+def session_display_name(state_path: Path) -> str:
+    if not state_path.exists():
+        return ""
+    try:
+        auth = load_auth(state_path)
+    except (IndahError, OSError, ValueError, json.JSONDecodeError):
+        return ""
+    return str(auth.user_payload.get("name") or auth.user_payload.get("username") or "Pengguna INDAH")
+
+
 def page(title: str, body: str) -> str:
+    user = getattr(REQUEST, "user", "")
+    theme_button = f'<button class="btn btn-secondary btn-icon theme-toggle" type="button" aria-label="Ganti tema">{ICON_MOON}{ICON_SUN}</button>'
+    if user:
+        account = f"""<span class="user">{escape(user)}</span>
+      {theme_button}
+      <form method="post" action="/keluar"><button class="btn btn-secondary btn-sm" type="submit">Keluar</button></form>"""
+    else:
+        account = f'{theme_button}<a class="btn btn-secondary btn-sm" href="/login">Masuk</a>'
     return f"""<!doctype html>
 <html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <title>{escape(title)}</title>
+  <title>{escape(title)} · INDAH Metadata</title>
+  {THEME_BOOT}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>{CSS}</style>
-  <script>
-    window.addEventListener("DOMContentLoaded", function () {{
-      var overlay = document.querySelector(".loading-overlay");
-      var title = document.querySelector(".loading-title");
-      var subtitle = document.querySelector(".loading-subtitle");
-      var progressBars = document.querySelectorAll(".progress-bar");
-      var progressOutputs = document.querySelectorAll(".progress-output");
-      var passwordInput = document.querySelector("#login-password");
-      var passwordToggle = document.querySelector("#toggle-password");
-      if (passwordInput && passwordToggle) {{
-        passwordToggle.addEventListener("click", function () {{
-          var show = passwordInput.type === "password";
-          passwordInput.type = show ? "text" : "password";
-          passwordToggle.querySelector(".eye-open").hidden = show;
-          passwordToggle.querySelector(".eye-closed").hidden = !show;
-          passwordToggle.setAttribute("aria-pressed", String(show));
-          passwordToggle.setAttribute("aria-label", show ? "Sembunyikan password" : "Lihat password");
-          passwordToggle.title = show ? "Sembunyikan password" : "Lihat password";
-        }});
-      }}
-
-      document.querySelectorAll('form[action^="/phase/"]').forEach(function (form) {{
-        function selectSource() {{
-          var selected = form.querySelector('input[name="source_mode"]:checked');
-          form.querySelectorAll("[data-source]").forEach(function (panel) {{
-            var active = selected && panel.getAttribute("data-source") === selected.value;
-            panel.hidden = !active;
-            panel.querySelectorAll("input").forEach(function (input) {{ input.disabled = !active; }});
-          }});
-          form.querySelector(".source-error").textContent = "";
-        }}
-        form.querySelectorAll('input[name="source_mode"]').forEach(function (radio) {{
-          radio.addEventListener("change", selectSource);
-        }});
-        selectSource();
-      }});
-
-      function updateProgress(runId) {{
-        if (!runId || !subtitle) return;
-        fetch("/run-status?id=" + encodeURIComponent(runId), {{cache: "no-store"}})
-          .then(function (response) {{ return response.json(); }})
-          .then(function (data) {{
-            progressBars.forEach(function (bar) {{ bar.style.width = String(data.percent || 0) + "%"; }});
-            subtitle.textContent = data.last_line || "Menyiapkan proses upload...";
-            progressOutputs.forEach(function (output) {{
-              output.textContent = data.output || "Menyiapkan proses upload...";
-              output.scrollTop = output.scrollHeight;
-            }});
-          }})
-          .catch(function () {{
-            subtitle.textContent = "Menunggu respons proses...";
-          }});
-      }}
-
-      function startProgressPolling(runId) {{
-        if (!runId) return;
-        updateProgress(runId);
-        window.setInterval(function () {{ updateProgress(runId); }}, 1000);
-      }}
-
-      startProgressPolling(document.body.getAttribute("data-progress-run-id"));
-
-      document.addEventListener("submit", function (event) {{
-        var form = event.target;
-        if (!form || !form.matches("form")) return;
-        if (form.matches('form[action^="/phase/"]')) {{
-          var panel = form.querySelector('[data-source]:not([hidden])');
-          var requiredFile = panel && panel.querySelector('input[type="file"]');
-          var url = panel && panel.querySelector('input[type="url"]');
-          if ((requiredFile && !requiredFile.files.length) || (url && !url.value.trim())) {{
-            event.preventDefault();
-            form.querySelector(".source-error").textContent = "Pilih file atau masukkan link sesuai cara yang dipilih terlebih dahulu.";
-            (requiredFile || url).focus();
-            return;
-          }}
-        }}
-        var confirmText = event.submitter && event.submitter.getAttribute("data-confirm")
-          ? event.submitter.getAttribute("data-confirm")
-          : form.getAttribute("data-confirm");
-        if (confirmText && !window.confirm(confirmText)) {{
-          event.preventDefault();
-          return;
-        }}
-        var label = form.getAttribute("data-loading-label") || "Memproses";
-        if (event.submitter && event.submitter.getAttribute("data-loading-label")) {{
-          label = event.submitter.getAttribute("data-loading-label");
-        }}
-        if (event.submitter) {{
-          var buttonAction = event.submitter.getAttribute("formaction");
-          if (buttonAction) {{
-            form.action = buttonAction;
-          }}
-          if (event.submitter.name) {{
-            var clicked = document.createElement("input");
-            clicked.type = "hidden";
-            clicked.name = event.submitter.name;
-            clicked.value = event.submitter.value || "1";
-            form.appendChild(clicked);
-          }}
-        }}
-        if (title) title.textContent = label;
-        if (subtitle) subtitle.textContent = "Menyiapkan upload...";
-        progressBars.forEach(function (bar) {{ bar.style.width = "5%"; }});
-        progressOutputs.forEach(function (output) {{ output.textContent = ""; }});
-        if (overlay) overlay.classList.add("is-visible");
-        document.querySelectorAll("button").forEach(function (button) {{
-          button.disabled = true;
-        }});
-      }});
-    }});
-  </script>
+  {PAGE_SCRIPT}
 </head>
 <body>
-  <div class="loading-overlay" aria-live="polite" aria-busy="true">
-    <div class="loading-box">
-      <div class="spinner"></div>
-      <div class="loading-title">Memproses</div>
-      <div class="progress-track"><div class="progress-bar"></div></div>
-      <div class="loading-subtitle">Mohon tunggu sampai hasilnya muncul.</div>
-      <div class="progress-output" aria-live="polite">Menyiapkan proses upload...</div>
-    </div>
-  </div>
-  <header>
-    <div class="wrap topline">
-      <a class="brand" href="/" aria-label="INDAH Upload Metadata, beranda">
-        <img src="/favicon.svg" alt="" width="38" height="38">
-        <span><span class="brand-title">INDAH</span><span class="brand-caption">Upload Metadata Statistik</span></span>
-      </a>
-      <a class="button secondary" href="/login">Login INDAH</a>
+  <div class="overlay" aria-live="polite"><div class="overlay-box"><div class="spinner"></div><span class="overlay-text">Memproses...</span></div></div>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/"><span class="brand-mark">{ICON_MARK}</span>INDAH Metadata</a>
+      <div class="top-actions">
+      {account}
+      </div>
     </div>
   </header>
-  <main>
-    <div class="wrap">
-      {body}
-    </div>
+  <main class="wrap">
+{body}
   </main>
 </body>
 </html>"""
 
 
+def page_head(title: str, subtitle: str = "", eyebrow: str = "") -> str:
+    eyebrow_html = f'<span class="eyebrow">{escape(eyebrow)}</span>' if eyebrow else ""
+    subtitle_html = f"<p>{escape(subtitle)}</p>" if subtitle else ""
+    return f'<div class="page-head">{eyebrow_html}<h1>{escape(title)}</h1>{subtitle_html}</div>'
+
+
+def notice(kind: str, html_text: str) -> str:
+    icon = ICON_CHECK if kind == "ok" else ICON_WARN
+    return f'<div class="notice notice-{kind}" role="{"status" if kind == "ok" else "alert"}">{icon}<span>{html_text}</span></div>'
+
+
 def render_home(state_path: Path, phase: str = "kegiatan") -> str:
     if phase not in PHASES:
         phase = "kegiatan"
-    descriptions = {"kegiatan": "Informasi kegiatan statistik", "variabel": "Data yang dikumpulkan", "indikator": "Ukuran hasil kegiatan"}
-    navigation = []
-    for slug, config in PHASES.items():
-        current = ' aria-current="step"' if slug == phase else ""
-        navigation.append(f'<a class="phase-link" href="/?phase={slug}"{current}><span class="step-number">{config["number"]}</span><span><strong>{config["title"].replace("MS-", "")}</strong><small>{descriptions[slug]}</small></span></a>')
-    links = "".join(navigation)
+    login_notice = ""
+    if not state_path.exists():
+        login_notice = notice("warn", 'Kamu belum masuk. <a href="/login">Masuk dengan akun INDAH</a> dulu sebelum mengunggah.')
+    elif not session_display_name(state_path):
+        login_notice = notice("warn", 'Sesi login sudah tidak berlaku. <a href="/login">Masuk lagi</a> sebelum mengunggah.')
     body = f"""
-<div class="intro">
-  <h1>Upload metadata statistik</h1>
-  <p>Mulai dari Kegiatan, lalu lengkapi Variabel dan Indikator. Gunakan file sesuai template dan pilih tahun laporan.</p>
-</div>
-<div class="workspace">
-  <aside class="workflow">
-    <h2>Jenis metadata</h2>
-    <nav class="phase-nav" aria-label="Pilih jenis metadata">{links}</nav>
-    <p class="workflow-note">Baru mulai? Simpan kegiatan terlebih dahulu. Variabel dan indikator akan dihubungkan ke kegiatan tersebut.</p>
-  </aside>
-  <div class="workspace-content">
-    <div class="session-note"><span>{session_status_text(state_path)}</span><a href="/login">Kelola login</a></div>
-    {render_phase_form(phase, PHASES[phase])}
-    <details class="cleanup-panel">
-      <summary>Pengelolaan data: hapus variabel atau indikator</summary>
-      <p class="help">Buka bagian ini hanya jika ingin menghapus data yang sudah diunggah.</p>
-      {render_cleanup_panel()}
-    </details>
-  </div>
-</div>
-<div class="app-footer">INDAH Metadata Upload. Gunakan judul kegiatan yang sama pada seluruh sheet agar data dapat dihubungkan.</div>
+{page_head("Upload metadata", "Pilih jenis metadata, unggah file Excel, lalu simpan. Data tersimpan sebagai draft di INDAH.")}
+{login_notice}
+{render_phase_form(phase, PHASES[phase])}
+<nav class="footer-links" aria-label="Menu lain">
+  <a href="/template.zip">Unduh template</a>
+  <a href="/riwayat">Riwayat upload</a>
+  <a class="danger" href="/hapus">Hapus data</a>
+</nav>
 """
-    return page("Upload Metadata INDAH", body)
+    return page("Upload metadata", body)
 
 
 def render_phase_form(phase: str, config: Dict[str, object]) -> str:
-    required = config["required"]
-    optional = config["optional"]
-    labels = {
-        "ms_kegiatan": "Informasi kegiatan",
-        "ms_kegiatan_variabel_dikumpulkan": "Variabel yang dikumpulkan",
-        "ms_kegiatan_wilayah": "Wilayah kegiatan",
-        "ms_variabel": "Informasi variabel",
-        "ms_variabel_value_domain": "Kode dan nilai variabel",
-        "ms_indikator": "Informasi indikator",
-        "ms_indikator_pembangun": "Indikator pembangun",
-        "ms_indikator_variabel_pembangun": "Variabel pembangun",
-    }
-    rows = []
-    for slug in list(required) + list(optional):
-        kind = '<span class="req">Wajib</span>' if slug in required else '<span class="opt">Opsional</span>'
-        rows.append(f"""<tr>
-  <td><label for="file-{slug}">{labels[slug]}</label><small>Sheet: {slug}</small>{kind}</td>
-  <td><input id="file-{slug}" type="file" name="file_{slug}" accept=".csv,.tsv,.xlsx,.xlsm"></td>
-</tr>""")
+    choices = []
+    for slug, item in PHASES.items():
+        title, desc = PHASE_INFO[slug]
+        checked = " checked" if slug == phase else ""
+        sheet = item["required"][0]
+        choices.append(f"""<label class="choice"><input type="radio" name="phase_choice" value="{slug}" data-sheet="{sheet}"{checked}><span class="radio" aria-hidden="true"></span><span><strong>{title}</strong><small>{desc}</small></span></label>""")
     current_year = int(time.strftime("%Y"))
     year_options = "".join(
         f'<option value="{year}"{" selected" if year == current_year else ""}>{year}</option>'
         for year in range(current_year + 1, current_year - 6, -1)
     )
-    phase_name = str(config["title"]).replace("MS-", "")
-    explanation = "Tuliskan identitas, tujuan, dan pelaksanaan kegiatan statistik." if phase == "kegiatan" else "Pastikan kegiatan induk sudah tersimpan dengan judul dan periode tahun yang sama."
+    sheet = config["required"][0]
     return f"""
-<section class="band">
-  <div class="phase-head">
-    <div>
-      <div class="phase-number">Tahap {config["number"]} / {config["title"]}</div>
-      <h2>Upload {phase_name.lower()}</h2>
-      <p>{explanation}</p>
+<form id="upload-form" class="panel" action="/phase/{phase}" method="post" enctype="multipart/form-data" novalidate>
+  <input type="hidden" id="source-mode" name="source_mode" value="workbook">
+  <div class="section">
+    <div class="step"><span class="step-num">1</span>Pilih jenis metadata</div>
+    <fieldset class="choices" aria-label="Jenis metadata">{"".join(choices)}</fieldset>
+  </div>
+  <div class="section">
+    <div class="section-head">
+      <div class="step"><span class="step-num">2</span>Unggah file</div>
+      <span class="small muted">Dibaca dari sheet <code id="sheet-name">{sheet}</code></span>
+    </div>
+    <label class="drop" id="drop" for="workbook" aria-disabled="false">
+      <span class="drop-icon">{ICON_UPLOAD}</span>
+      <strong>Tarik file Excel ke sini, atau klik untuk memilih</strong>
+      <span class="small muted">Format .xlsx atau .xlsm, maksimal 25 MB</span>
+      <input id="workbook" type="file" name="workbook_file" accept=".xlsx,.xlsm">
+    </label>
+    <span id="file-name" class="small muted" aria-live="polite"></span>
+    <button type="button" id="use-link" class="link-btn">Atau pakai link Google Sheets</button>
+    <div id="link-box" class="field" hidden>
+      <label for="sheet-url">Link Google Sheets</label>
+      <div class="input-row">
+        <input id="sheet-url" class="input is-active" type="url" name="spreadsheet_url" placeholder="https://docs.google.com/spreadsheets/d/..." disabled>
+        <button type="button" id="cancel-link" class="btn btn-secondary btn-icon" aria-label="Batal pakai link, kembali ke upload file" title="Batal">{ICON_CLOSE}</button>
+      </div>
+      <span class="small muted">Pastikan aksesnya "Siapa saja yang memiliki link".</span>
     </div>
   </div>
-  <form action="/phase/{phase}" method="post" enctype="multipart/form-data" data-loading-label="Memeriksa isian {phase_name.lower()}">
-    <section class="form-section">
-      <h3>Masukkan sumber data</h3>
-      <p>Pilih salah satu cara. File Excel dengan seluruh sheet adalah pilihan yang paling praktis.</p>
-      <fieldset class="source-picker">
-        <legend>Cara memasukkan data</legend>
-        <div class="source-options">
-          <label class="source-option"><input type="radio" name="source_mode" value="workbook" checked>File Excel gabungan</label>
-          <label class="source-option"><input type="radio" name="source_mode" value="url">Link spreadsheet</label>
-          <label class="source-option"><input type="radio" name="source_mode" value="files">File per sheet</label>
-        </div>
-      </fieldset>
-      <div class="source-panel" data-source="workbook">
-        <label class="field">
-          <span>File Excel gabungan</span>
-          <input type="file" name="workbook_file" accept=".xlsx,.xlsm">
-          <small>Format .xlsx atau .xlsm. Nama sheet wajib: {", ".join(required)}.</small>
-          <small>Sheet tambahan jika tersedia: {", ".join(optional)}.</small>
-        </label>
-      </div>
-      <div class="source-panel" data-source="url">
-        <label class="field">
-          <span>Link spreadsheet</span>
-          <input type="url" name="spreadsheet_url" placeholder="https://docs.google.com/spreadsheets/d/...">
-          <small>Gunakan link yang dapat dibuka tanpa meminta akses. Nama sheet mengikuti template.</small>
-        </label>
-      </div>
-      <div class="source-panel" data-source="files">
-        <p class="help">Unggah file untuk setiap sheet. Format: CSV, TSV, XLSX, atau XLSM.</p>
-        <table class="input-table">
-          <thead><tr><th>Isian yang dibutuhkan</th><th>File</th></tr></thead>
-          <tbody>{"".join(rows)}</tbody>
-        </table>
-      </div>
-      <div class="captcha-error source-error" role="alert"></div>
-    </section>
-    <section class="form-section">
-      <h3>Tentukan periode laporan</h3>
-      <label class="field year-field">
-        <span>Periode Tahun <span class="req">Wajib</span></span>
+  <div class="section">
+    <div class="step"><span class="step-num">3</span>Pilih tahun, lalu simpan</div>
+    <div class="submit-row">
+      <label class="year">Tahun laporan
         <select name="submission_period" required>{year_options}</select>
-        <small>Pilih tahun tujuan pelaporan. Isian tahun di dalam file tetap mengikuti file Anda.</small>
       </label>
-    </section>
-    <details>
-      <summary>Pengaturan tambahan (opsional)</summary>
-      <div class="grid">
-        <label class="field">
-          <span>Hanya proses judul kegiatan tertentu</span>
-          <input type="text" name="only_title" placeholder="Kosongkan untuk semua kegiatan">
-          <small>Isi judul persis seperti yang tertulis pada sheet.</small>
-        </label>
-        <label class="field">
-          <span>Batas jumlah data</span>
-          <input type="number" name="limit" min="0" step="1" placeholder="Semua data">
-          <small>Kosong atau 0 berarti semua data diproses.</small>
-        </label>
+      <div class="actions">
+        <button class="btn btn-secondary" type="submit" name="final_submit" value="1" data-busy="Mengirim data ke INDAH..." data-confirm="Kirim data ke INDAH untuk ditinjau? Pastikan isian dan tahun laporan sudah benar.">Submit Data</button>
+        <button class="btn btn-primary" type="submit" name="submit" value="1" data-busy="Menyimpan draft...">Simpan sebagai draft</button>
       </div>
-    </details>
-    <div class="actions">
-      <button type="submit" name="submit" value="1" data-loading-label="Menyimpan draft {phase_name.lower()}">Simpan sebagai draft</button>
-      <button class="secondary" type="submit" name="final_submit" value="1" data-loading-label="Mengirim {phase_name.lower()} ke INDAH" data-confirm="Kirim untuk peninjauan di INDAH? Pastikan seluruh isian dan periode tahun sudah benar.">Kirim untuk peninjauan</button>
     </div>
-    <p class="action-note">Draft memberi Anda kesempatan memeriksa isian di INDAH. Kirim untuk peninjauan jika isian sudah siap.</p>
-  </form>
-</section>
+    <div id="form-error" class="notice notice-error" role="alert" hidden>{ICON_WARN}<span></span></div>
+  </div>
+</form>
 """
 
 
 def render_cleanup_panel() -> str:
-    return """
-<section class="band">
-  <div class="phase-head">
-    <div>
-      <h3>Hapus variabel atau indikator</h3>
+    return f"""
+<form class="panel" action="/cleanup/all" method="post" data-busy-form>
+  <div class="section">
+    <div class="step">Kegiatan yang datanya mau dihapus</div>
+    <p class="small muted">Isi minimal salah satu. Semua variabel atau indikator milik kegiatan ini akan dihapus dari INDAH.</p>
+    <div class="grid-2">
+      <div class="field">
+        <label for="cleanup-title">Judul kegiatan</label>
+        <input id="cleanup-title" class="input" type="text" name="cleanup_title" placeholder="Judul persis seperti di INDAH">
+      </div>
+      <div class="field">
+        <label for="cleanup-id">Nomor kegiatan di INDAH</label>
+        <input id="cleanup-id" class="input" type="text" name="cleanup_ms_keg_id" inputmode="numeric" placeholder="Contoh: 104286">
+      </div>
     </div>
-    <div class="phase-number">Berdasarkan judul kegiatan</div>
   </div>
-  <form action="/cleanup/all" method="post" data-loading-label="Menghapus phase 2 dan 3">
-    <div class="grid">
-      <label class="field">
-        <span>Judul kegiatan</span>
-        <input type="text" name="cleanup_title" placeholder="Judul persis seperti di INDAH">
-        <small>Semua variabel atau indikator dari kegiatan ini akan dihapus. Isi judul atau nomor kegiatan, minimal salah satu.</small>
-      </label>
-      <label class="field">
-        <span>Nomor kegiatan di INDAH</span>
-        <input type="text" name="cleanup_ms_keg_id" inputmode="numeric" placeholder="Contoh: 104286">
-        <small>Lebih tepat daripada judul jika ada beberapa kegiatan bernama mirip.</small>
-      </label>
+  <div class="section">
+    <div class="actions">
+      <button class="btn btn-danger" type="submit" formaction="/cleanup/variabel" data-busy="Menghapus variabel..." data-confirm="Hapus semua variabel dari kegiatan ini?">Hapus variabel</button>
+      <button class="btn btn-danger" type="submit" formaction="/cleanup/indikator" data-busy="Menghapus indikator..." data-confirm="Hapus semua indikator dari kegiatan ini?">Hapus indikator</button>
+      <button class="btn btn-danger" type="submit" formaction="/cleanup/all" data-busy="Menghapus variabel dan indikator..." data-confirm="Hapus semua variabel dan indikator dari kegiatan ini?">Hapus keduanya</button>
     </div>
-    <div class="cleanup-actions" style="margin-top: 14px;">
-      <button class="danger" type="submit" formaction="/cleanup/variabel" data-loading-label="Menghapus variabel" data-confirm="Hapus seluruh variabel dari kegiatan yang dipilih?">Hapus variabel</button>
-      <button class="danger" type="submit" formaction="/cleanup/indikator" data-loading-label="Menghapus indikator" data-confirm="Hapus seluruh indikator dari kegiatan yang dipilih?">Hapus indikator</button>
-      <button class="danger" type="submit" formaction="/cleanup/all" data-loading-label="Menghapus variabel dan indikator" data-confirm="Hapus seluruh variabel dan indikator dari kegiatan yang dipilih?">Hapus keduanya</button>
-    </div>
-  </form>
-</section>
+  </div>
+</form>
 """
+
+
+def render_cleanup_page() -> str:
+    body = f"""
+{page_head("Hapus data", "Menghapus variabel atau indikator dari satu kegiatan di INDAH. Tindakan ini tidak bisa dibatalkan.")}
+{render_cleanup_panel()}
+<nav class="footer-links"><a href="/">Kembali ke upload</a></nav>
+"""
+    return page("Hapus data", body)
+
+
+def run_title(run_id: str) -> str:
+    kind = run_id.split("-", 1)[0]
+    if kind in PHASE_INFO:
+        return PHASE_INFO[kind][0]
+    return "Hapus data" if kind == "cleanup" else kind
+
+
+def status_class(status: str) -> str:
+    return {"Selesai": "ok", "Selesai dengan masalah": "warn", "Terhenti": "bad", "Berjalan": "run"}.get(status, "warn")
+
+
+def render_history(owner: str) -> str:
+    rows = []
+    if UI_RUNS_ROOT.exists():
+        runs = [d for d in UI_RUNS_ROOT.iterdir() if d.is_dir() and run_owned_by(d, owner)]
+        runs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        for run_dir in runs[:30]:
+            summary = run_status(run_dir.name, owner)
+            status = str(summary.get("status") or ("Berjalan" if not summary.get("done") else "Selesai"))
+            when = datetime.fromtimestamp(run_dir.stat().st_mtime, WIB).strftime("%d %b %Y, %H.%M WIB")
+            rows.append(f"""<li><a href="/run?id={escape(run_dir.name)}"><span><strong>{escape(run_title(run_dir.name))}</strong><br><span class="small muted">{when} · <code>{escape(run_dir.name)}</code></span></span><span class="status status-{status_class(status)}">{escape(status)}</span></a></li>""")
+    content = f'<ul class="history">{"".join(rows)}</ul>' if rows else '<p class="empty">Belum ada proses dari browser ini.</p>'
+    body = f"""
+{page_head("Riwayat upload", "Proses yang dijalankan dari browser ini. Data lebih dari 90 hari dihapus otomatis.")}
+<section class="panel">{content}</section>
+<nav class="footer-links"><a href="/">Kembali ke upload</a></nav>
+"""
+    return page("Riwayat upload", body)
+
+
+def template_zip() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(TEMPLATE_DIR.glob("*.csv")):
+            archive.write(path, path.name)
+    return buffer.getvalue()
 
 
 def render_login_form(state_path: Path, error: str = "") -> str:
-    status = session_status_text(state_path)
-    error_html = f'<div class="login-error" role="alert">{escape(error)}</div>' if error else ""
+    name = session_display_name(state_path)
+    status = notice("ok", f"Saat ini masuk sebagai <strong>{escape(name)}</strong>.") if name else ""
+    error_html = notice("error", escape(error)) if error else ""
     body = f"""
-<section class="band login-card">
-  <h2>Login ke INDAH</h2>
-  <p class="help">Gunakan akun INDAH Anda untuk menyimpan metadata. Login berlaku untuk browser ini.</p>
-  <div class="login-status">{status}</div>
-  {error_html}
-  <form id="indah-login-form" action="/login" method="post" data-loading-label="Login ke INDAH">
-    <div class="grid">
-      <label class="field">
-        <span>Username INDAH</span>
-        <input type="text" name="username" autocomplete="username" required>
-      </label>
-      <div class="field">
-        <label for="login-password">Password INDAH</label>
-        <div class="password-control">
-          <input id="login-password" type="password" name="password" autocomplete="current-password" required>
-          <button id="toggle-password" class="secondary icon-button" type="button" aria-controls="login-password" aria-pressed="false" aria-label="Lihat password" title="Lihat password">
-            <span class="eye-open" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>
-            <span class="eye-closed" aria-hidden="true" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg></span>
-          </button>
-        </div>
-        <small>Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.</small>
+<div class="login">
+{page_head("Masuk", "Pakai akun INDAH (indah.bps.go.id). Login berlaku untuk browser ini saja.")}
+</div>
+<form class="panel login" action="/login" method="post" data-busy-form>
+  <div class="section">
+    {status}
+    {error_html}
+    <div class="field">
+      <label for="login-username">Username</label>
+      <input id="login-username" class="input" type="text" name="username" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <div class="input-row">
+        <input id="login-password" class="input" type="password" name="password" autocomplete="current-password" required>
+        <button id="toggle-password" class="btn btn-secondary btn-icon" type="button" aria-pressed="false" aria-label="Lihat password">{ICON_EYE}</button>
       </div>
     </div>
-    <div class="login-actions">
-      <button type="submit">Login</button>
-      <a class="button secondary icon-button" href="/" aria-label="Kembali ke halaman upload" title="Kembali ke halaman upload"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 4-5 5 5 5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></a>
-    </div>
-  </form>
-</section>
+    <button class="btn btn-primary" type="submit" data-busy="Masuk ke INDAH...">Masuk</button>
+    <p class="small muted">Password langsung diteruskan ke API resmi INDAH dan tidak disimpan.</p>
+  </div>
+</form>
 """
-    return page("Login INDAH", body)
+    return page("Masuk", body)
 
 
 def handle_web_login(handler: BaseHTTPRequestHandler, state_path: Path) -> str:
@@ -574,17 +670,13 @@ def handle_web_login(handler: BaseHTTPRequestHandler, state_path: Path) -> str:
 
     user_info = response.get("userInfo") or {}
     display_name = user_info.get("name") or user_info.get("username") or username
+    REQUEST.user = str(display_name)
     body = f"""
-<section class="band result">
-  <h2>Login berhasil</h2>
-  <div class="meta-list">
-    <div><span>Pengguna</span><span class="ok">{escape(display_name)}</span></div>
-    <div><span>Session</span><span>Sesi ini hanya dipakai oleh browser Anda.</span></div>
-  </div>
-  <a class="button" href="/">Lanjut ke upload metadata</a>
-</section>
+{page_head("Berhasil masuk")}
+{notice("ok", f"Kamu masuk sebagai <strong>{escape(display_name)}</strong>. Sesi ini hanya dipakai oleh browser ini.")}
+<div class="actions"><a class="btn btn-primary" href="/">Lanjut upload metadata</a></div>
 """
-    return page("Login berhasil", body)
+    return page("Berhasil masuk", body)
 
 
 def authenticate_indah(username: str, password: str) -> Dict[str, object]:
@@ -1184,29 +1276,29 @@ def run_status(run_id: str, owner: str) -> Dict[str, object]:
 
 
 def render_run_progress(run_id: str, phase: str) -> str:
-    heading = f"Upload {PHASES[phase]['title']} berjalan" if phase in PHASES else "Penghapusan data berjalan"
+    if phase in PHASES:
+        heading = f"Mengunggah {PHASE_INFO[phase][0].lower()}"
+    else:
+        heading = "Penghapusan data berjalan"
     body = f"""
-<section class="band result">
-  <h2>{escape(heading)}</h2>
-  <div class="meta-list">
-<div><span>Nomor proses</span><span>{escape(run_id)}</span></div>
-    <div><span>Status</span><span class="warn">Memproses di BPS INDAH</span></div>
+{page_head(heading, eyebrow="Proses berjalan")}
+<section class="panel" id="progress" data-run-id="{escape(run_id)}">
+  <div class="section">
+    <span class="status status-run">Sedang berjalan</span>
+    <div class="progress-head"><span id="progress-label">Menyiapkan proses...</span><strong id="pct">0%</strong></div>
+    <div class="progress-track" role="progressbar" aria-label="Kemajuan proses" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" id="bar"></div></div>
+    {notice("warn", "Jangan tutup halaman ini sampai proses selesai. Halaman pindah otomatis ke hasil.")}
   </div>
-  <p>Persentase menunjukkan data yang selesai diproses, termasuk data yang gagal atau dilewati.</p>
-  <div class="progress-track"><div class="progress-bar" style="width: 0%;"></div></div>
-  <div class="progress-output" aria-live="polite">Menyiapkan proses upload...</div>
-  <p><a class="button secondary" href="/run?id={escape(run_id)}">Lihat hasil proses</a></p>
+  <div class="section">
+    <details>
+      <summary>Detail proses</summary>
+      <pre class="log" id="progress-log" aria-live="polite">Menyiapkan proses...</pre>
+    </details>
+    <p class="small muted">Nomor proses <code>{escape(run_id)}</code></p>
+  </div>
 </section>
-<script>
-document.body.setAttribute("data-progress-run-id", "{escape(run_id)}");
-window.setInterval(function () {{
-  fetch("/run-status?id={escape(run_id)}", {{cache: "no-store"}})
-    .then(function (response) {{ return response.json(); }})
-    .then(function (data) {{ if (data.done) window.location.href = "/run?id={escape(run_id)}"; }});
-}}, 1200);
-</script>
 """
-    return page("Upload berjalan", body)
+    return page("Proses berjalan", body)
 
 
 def render_run_result(
@@ -1219,42 +1311,74 @@ def render_run_result(
     stderr: str,
 ) -> str:
     result = upload_summary(stdout, stderr, returncode)
-    status = escape(result["status"])
-    status_class = "ok" if result["status"] == "Selesai" else "bad" if result["status"] == "Terhenti" else "warn"
-    phase_title = str(PHASES.get(phase, {}).get("title", phase))
+    status = str(result["status"])
+    title = PHASE_INFO[phase][0].lower() if phase in PHASE_INFO else "data"
+    heading = {
+        "Selesai": f"Upload {title} selesai",
+        "Selesai dengan masalah": f"Upload {title} selesai, perlu dicek",
+        "Terhenti": f"Upload {title} terhenti",
+        "Tidak ada data yang diproses": "Tidak ada data yang diproses",
+    }.get(status, f"Proses {title} selesai")
+    if phase not in PHASE_INFO:
+        heading = "Penghapusan selesai" if status == "Selesai" else "Penghapusan perlu dicek"
+    problems = int(result["failed"]) + int(result["skipped"]) + int(result["remaining"])
+    warning = ""
+    if problems or status == "Terhenti":
+        warning = notice("warn", "<strong>Ada data yang belum tersimpan.</strong> Cek di INDAH dulu sebelum upload ulang, supaya tidak dobel.")
+    elif status == "Selesai":
+        warning = notice("ok", "Semua data berhasil diproses.")
+    stats = "".join(
+        f'<div class="stat {kind}"><b>{value}</b><span>{label}</span></div>'
+        for value, label, kind in (
+            (result["success"], "Tersimpan", "ok"),
+            (result["failed"], "Gagal", "bad" if result["failed"] else ""),
+            (result["skipped"], "Dilewati", "warn" if result["skipped"] else ""),
+            (result["remaining"], "Belum dikirim", "warn" if result["remaining"] else ""),
+        )
+    )
+    again = f"/?phase={phase}" if phase in PHASES else "/hapus"
     body = f"""
-<section class="band result">
-  <h2>Hasil {escape(phase_title)}</h2>
-  <div class="meta-list">
-    <div><span>Nomor proses</span><span>{escape(run_id)}</span></div>
-    <div><span>Status</span><span class="{status_class}">{status}</span></div>
-    <div><span>Berhasil</span><span>{result['success']} data</span></div>
-    <div><span>Gagal</span><span>{result['failed']} data</span></div>
-    <div><span>Dilewati</span><span>{result['skipped']} data</span></div>
-    <div><span>Belum dikirim</span><span>{result['remaining']} data</span></div>
+{page_head(heading, eyebrow=PHASE_INFO[phase][0] if phase in PHASE_INFO else "Hapus data")}
+<section class="panel">
+  <div class="section">
+    <span class="status status-{status_class(status)}">{escape(status)}</span>
+    <div class="progress-head"><span>{result['success'] + result['failed'] + result['skipped']} dari {result['total']} data diproses</span><strong>{result['percent']}%</strong></div>
+    <div class="progress-track"><div class="progress-bar" style="width: {result['percent']}%"></div></div>
   </div>
-  <h3>Kesimpulan</h3>
-  <div class="progress-output">{escape(result['output'])}</div>
-  <p>Periksa hasil di INDAH sebelum mengulang data yang belum mendapat konfirmasi.</p>
-  <a class="button secondary" href="/">Kembali</a>
+  <div class="stats">{stats}</div>
+  <div class="section">
+    {warning}
+    <details{" open" if problems or status == "Terhenti" else ""}>
+      <summary>Kesimpulan</summary>
+      <pre class="log">{escape(result['output'])}</pre>
+    </details>
+    <div class="submit-row">
+      <span class="small muted">Nomor proses <code>{escape(run_id)}</code></span>
+      <div class="actions">
+        <a class="btn btn-secondary" href="{again}">{"Upload lagi" if phase in PHASES else "Hapus data lain"}</a>
+        <a class="btn btn-primary" href="{WEB_URL}" target="_blank" rel="noopener">Buka di INDAH</a>
+      </div>
+    </div>
+  </div>
 </section>
 """
-    return page("Hasil Phase", body)
+    return page("Hasil proses", body)
 
 
 def render_error(run_id: str, message: str) -> str:
     body = f"""
-<section class="band result">
-  <h2>Proses belum berhasil</h2>
-  <div class="meta-list">
-    <div><span>Nomor proses</span><span>{escape(run_id)}</span></div>
-    <div><span>Status</span><span class="bad">Gagal</span></div>
+{page_head("Proses belum berhasil")}
+<section class="panel">
+  <div class="section">
+    {notice("error", escape(friendly_error(message)))}
+    <div class="submit-row">
+      <span class="small muted">Nomor proses <code>{escape(run_id)}</code></span>
+      <div class="actions"><a class="btn btn-primary" href="/">Kembali ke upload</a></div>
+    </div>
   </div>
-  <p>{escape(friendly_error(message))}</p>
-  <a class="button secondary" href="/">Kembali</a>
 </section>
 """
-    return page("Error", body)
+    return page("Proses belum berhasil", body)
 
 
 def render_saved_run(run_id: str, owner: str) -> str:
@@ -1265,7 +1389,21 @@ def render_saved_run(run_id: str, owner: str) -> str:
     error_path = run_dir / "error.txt"
     if error_path.exists():
         result = run_status(safe_id, owner)
-        return page("Proses terhenti", f'<section class="band result"><h2>Proses terhenti</h2><p>Nomor proses: {escape(safe_id)}</p><div class="progress-output">{escape(result["output"])}</div><a class="button secondary" href="/">Kembali</a></section>')
+        body = f"""
+{page_head("Proses terhenti", eyebrow=run_title(safe_id))}
+<section class="panel">
+  <div class="section">
+    <span class="status status-bad">Terhenti</span>
+    {notice("error", "Proses berhenti sebelum selesai. Cek di INDAH sebelum mengulang, supaya tidak dobel.")}
+    <details open><summary>Kesimpulan</summary><pre class="log">{escape(result["output"])}</pre></details>
+    <div class="submit-row">
+      <span class="small muted">Nomor proses <code>{escape(safe_id)}</code></span>
+      <div class="actions"><a class="btn btn-primary" href="/">Kembali ke upload</a></div>
+    </div>
+  </div>
+</section>
+"""
+        return page("Proses terhenti", body)
     try:
         summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
