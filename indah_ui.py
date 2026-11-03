@@ -824,15 +824,6 @@ def user_state_path(session_id: str) -> Path:
     return UI_SESSION_ROOT / f"{session_id}.json"
 
 
-def session_status_text(state_path: Path) -> str:
-    if not state_path.exists():
-        return '<span class="warn">Belum login dari browser ini</span>'
-    try:
-        auth = load_auth(state_path)
-        name = auth.user_payload.get("name") or auth.user_payload.get("username") or "Pengguna INDAH"
-        return f'<span class="ok">Login sebagai {escape(name)}</span>'
-    except (IndahError, OSError, ValueError, json.JSONDecodeError):
-        return '<span class="bad">Session tidak valid, silakan login ulang</span>'
 
 
 def handle_phase_run(phase: str, handler: BaseHTTPRequestHandler, state_path: Path) -> str:
@@ -1417,15 +1408,8 @@ def render_saved_run(run_id: str, owner: str) -> str:
                              summary.get("command") or [], summary["returncode"], stdout, stderr)
 
 
-def status_text(ok: bool, yes: str, no: str) -> str:
-    class_name = "ok" if ok else "warn"
-    return f'<span class="{class_name}">{escape(yes if ok else no)}</span>'
 
 
-def map_status(path: Path) -> str:
-    if path.exists():
-        return f'<span class="ok">{escape(str(path.relative_to(PROJECT_ROOT)))}</span>'
-    return '<span class="warn">Belum ada</span>'
 
 
 def escape(value: object) -> str:

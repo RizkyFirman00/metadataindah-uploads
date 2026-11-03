@@ -14,5 +14,4 @@ ui_uploads/
 *.log
 *.tmp
 
-sampah/
 *.before-*

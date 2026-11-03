@@ -1,109 +1,50 @@
 # INDAH Metadata Automation
 
-Automation tersedia lewat UI lokal dan script phase terpisah.
+Upload metadata statistik (kegiatan, variabel, indikator) ke INDAH BPS lewat UI web
+atau lewat script per jenis dari terminal.
 
-## Login dari UI Web
+## Pakai lewat UI web
 
-Buka UI, klik **Login INDAH**, lalu masukkan username dan password akun INDAH.
-Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.
+1. Klik **Masuk** dan login dengan akun INDAH. Password hanya diteruskan ke API resmi
+   INDAH dan tidak disimpan. Tiap browser punya sesi sendiri di `.indah_session/ui_sessions/`.
+2. Pilih jenis metadata: Kegiatan, Variabel, atau Indikator.
+3. Unggah file Excel (`.xlsx`/`.xlsm`, nama sheet sesuai template) atau pakai link
+   Google Sheets.
+4. Pilih tahun laporan, lalu **Simpan sebagai draft** atau **Submit Data**
+   (status SUBMITTED). Tahun ini dikirim sebagai `submission_period` dan tidak mengubah
+   kolom `tahun` di file. Variabel dan indikator hanya dihubungkan ke kegiatan dengan
+   judul dan tahun yang sama.
 
-Setiap browser mendapat file session terpisah di `.indah_session/ui_sessions/`,
-sehingga proses upload dan cleanup memakai akun browser tersebut dan tidak
-berbagi session global dengan pengguna lain.
+Sheet wajib: `ms_kegiatan`, `ms_variabel`, atau `ms_indikator`. Sheet tambahan
+(wilayah, value domain, pembangun) ikut dipakai kalau ada. Template CSV bisa diunduh
+dari tautan **Unduh template** di UI, sumbernya `indah_metadata_csv_templates/`.
 
-## UI Lokal
+Menu lain: **Riwayat upload** (proses dari browser itu), **Hapus data** (hapus variabel
+atau indikator dari satu kegiatan), tombol tema terang/gelap, dan **Keluar**.
 
-Jalankan:
+## Menjalankan
 
-```bash
-cd "Meta Indah 2026"
-../venv/bin/python indah_ui.py
-```
-
-Buka URL yang muncul di terminal, biasanya:
-
-```text
-http://127.0.0.1:8765
-```
-
-## Docker Compose
-
-Jalankan UI lewat Docker:
+Lokal:
 
 ```bash
-cd "Meta Indah 2026"
-docker compose up --build
+python3 indah_ui.py            # http://127.0.0.1:8765
 ```
 
-Buka:
-
-```text
-http://127.0.0.1:8765
-```
-
-Compose akan mount folder project ke `/app`, jadi file berikut tetap tersimpan di folder lokal:
-
-- `.indah_session/`
-- `run_state/`
-- `ui_uploads/`
-- `ui_runs/`
-- `dispora/`
-
-Login Playwright manual tetap tersedia sebagai fallback dari terminal host:
+Docker (dipakai di server):
 
 ```bash
-../venv/bin/python indah_login.py
+docker compose up -d --build   # port 127.0.0.1:8765
 ```
 
-Setelah `.indah_session/storage_state.json` ada, container dapat memakai session itu karena folder project dimount.
+Container jalan sebagai user `1001` dan me-mount folder project ke `/app`, jadi
+`.indah_session/`, `run_state/`, `ui_uploads/`, dan `ui_runs/` tersimpan di folder ini.
+Akses publik lewat Cloudflare Tunnel ke `http://localhost:8765`.
 
-## Docker Compose Dengan noVNC
+### Opsional: login Playwright + noVNC
 
-Jalankan UI + browser remote untuk login manual:
-
-```bash
-cd "Meta Indah 2026"
-docker compose -f docker-compose.vnc.yml up -d --build
-```
-
-Buka UI automation:
-
-```text
-http://127.0.0.1:8765
-```
-
-Buka browser remote noVNC:
-
-```text
-http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=remote
-```
-
-Kalau memakai Cloudflare Tunnel, arahkan Public Hostname ke service berikut:
-
-- `metadata.domainkamu.com` -> `http://localhost:8765`
-- `vnc.domainkamu.com` -> `http://localhost:6080`
-
-Aktifkan Cloudflare Access untuk dua hostname itu supaya UI dan noVNC tidak terbuka publik.
-Saat user klik **Buka login manual** di UI, browser login INDAH akan muncul di halaman noVNC dan session tetap tersimpan di `.indah_session/storage_state.json`.
-
-Setiap phase menerima:
-
-- file satuan `.csv`, `.tsv`, `.xlsx`, atau `.xlsm`
-- workbook gabungan dengan nama sheet sesuai template, misalnya `ms_kegiatan`
-- URL spreadsheet yang bisa diakses publik/diekspor
-
-Pada UI, pilih **Periode Tahun** sebelum menyimpan draft atau submit langsung.
-Pilihan ini dikirim sebagai `submission_period` API dan tidak mengubah kolom
-`tahun` di dalam file. MS-Variabel dan MS-Indikator hanya akan memakai
-MS-Kegiatan induk pada periode yang sama.
-
-Input wajib per phase:
-
-- Kegiatan: `ms_kegiatan`
-- Variabel: `ms_variabel`
-- Indikator: `ms_indikator`
-
-Input opsional akan ikut dipakai kalau diunggah.
+`docker-compose.vnc.yml` menjalankan browser remote (noVNC, port 6080) untuk login manual
+dengan `indah_login.py`. Sesi hasil login disimpan di `.indah_session/storage_state.json`
+dan dipakai script terminal. UI web tidak membutuhkan ini.
 
 ## Script Terpisah
 
