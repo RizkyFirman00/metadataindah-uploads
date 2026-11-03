@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fluxbox \
+        fonts-liberation \
+        novnc \
+        websockify \
+        x11vnc \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir playwright \
+    && python -m playwright install --with-deps chromium
+
+COPY . /app
+COPY docker-entrypoint-vnc.sh /usr/local/bin/indah-vnc-entrypoint
+
+RUN chmod +x /usr/local/bin/indah-vnc-entrypoint
+
+EXPOSE 8765 6080
+
+CMD ["indah-vnc-entrypoint"]
