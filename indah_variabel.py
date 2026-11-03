@@ -13,7 +13,6 @@ from indah_automation.shared import (
     draft_name_errors,
     extract_created_id,
     find_csv,
-    is_error_result,
     load_auth,
     map_rows_by_title,
     pick,
@@ -21,7 +20,9 @@ from indah_automation.shared import (
     read_csv_rows,
     resolve_ms_keg_reference,
     response_status,
+    retry_api_result,
     rows_for_variabel,
+    upload_progress,
 )
 
 
@@ -30,6 +31,7 @@ def main() -> None:
     parser.add_argument("--folder", default=str(PROJECT_ROOT / "dispora"), help="Folder sumber CSV.")
     parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Storage state hasil indah_login.py.")
     parser.add_argument("--run-state", default=str(DEFAULT_RUN_STATE_DIR), help="Folder mapping kegiatan/variabel.")
+    parser.add_argument("--submission-period", type=int, help="Periode tahun MS-Kegiatan induk, misalnya 2025.")
     parser.add_argument("--submit", action="store_true", help="Benar-benar POST simpan sementara ke INDAH.")
     parser.add_argument("--final-submit", action="store_true", help="POST/PUT ke INDAH dengan status SUBMITTED/REVISED.")
     parser.add_argument("--limit", type=int, default=0, help="Batasi jumlah row untuk test.")
@@ -38,6 +40,8 @@ def main() -> None:
     parser.add_argument("--no-auto-resolve-kegiatan", action="store_true", help="Matikan pencarian otomatis MS-Kegiatan dari judul.")
     parser.add_argument("--auto-resolve-max-pages", type=int, default=2, help="Batas halaman scan saat auto-resolve kegiatan.")
     args = parser.parse_args()
+    if args.submission_period is not None and not 2000 <= args.submission_period <= 2100:
+        parser.error("--submission-period harus berada antara 2000 dan 2100")
     if args.final_submit:
         args.submit = True
 
@@ -53,7 +57,7 @@ def main() -> None:
         variabel_rows = variabel_rows[: args.limit]
 
     kegiatan_map_path = Path(args.run_state) / "kegiatan_map.csv"
-    kegiatan_map = map_rows_by_title(kegiatan_map_path)
+    kegiatan_map = map_rows_by_title(kegiatan_map_path, args.submission_period)
     variabel_map_path = Path(args.run_state) / "variabel_map.csv"
     existing_variabel_rows = read_csv_rows(variabel_map_path)
     existing_variabel_by_parent = {
@@ -66,6 +70,7 @@ def main() -> None:
     }
     print(f"CSV variabel: {variabel_path}")
     print(f"Rows variabel: {len(variabel_rows)}")
+    upload_progress("validation", 0, len(variabel_rows))
 
     auto_resolve = not args.no_auto_resolve_kegiatan
     auth = None
@@ -86,6 +91,7 @@ def main() -> None:
     for index, row in enumerate(variabel_rows, 1):
         title = pick(row, "judul_kegiatan") or ""
         name = pick(row, "nama", "variabel_nama") or f"row-{index}"
+        upload_progress("validation", index, len(variabel_rows), title + " / " + name)
         errors = draft_name_errors(row, "nama", "variabel_nama")
         if title in ms_keg_cache:
             ms_keg_id, ms_keg_item, ms_keg_source = ms_keg_cache[title]
@@ -94,6 +100,7 @@ def main() -> None:
                 row,
                 kegiatan_map,
                 client,
+                submission_period=args.submission_period,
                 auto_resolve=auto_resolve,
                 max_scan_pages=args.auto_resolve_max_pages,
             )
@@ -106,11 +113,14 @@ def main() -> None:
                     "detail_url": f"https://indah.bps.go.id/metadata/view-kegiatan/{ms_keg_id}",
                     "status": ms_keg_item.get("status") or "",
                 }
-        if not ms_keg_id:
+        if ms_keg_source == "period-mismatch":
+            errors.append(f"MS-Kegiatan tidak ditemukan pada periode {args.submission_period}")
+        elif not ms_keg_id:
             errors.append("MS-Kegiatan tidak ditemukan otomatis; jalankan phase kegiatan atau isi ms_keg_id")
         elif ms_keg_source == "stale":
             errors.append("MS-Kegiatan dari ms_keg_id/map tidak bisa diakses; cek ID atau jalankan phase kegiatan ulang")
         if errors:
+            upload_progress("item", index, len(variabel_rows), title + " / " + name, "skipped", ", ".join(errors))
             skipped_count += 1
             print(f"[skip] {title} / {name}: {', '.join(errors)}")
             continue
@@ -140,16 +150,18 @@ def main() -> None:
         print(f"[abort] Submit dibatalkan: ada {skipped_count} row skip. Tidak ada data yang dikirim ke INDAH.")
         raise SystemExit(1)
 
-    for item in valid_items:
+    for index, item in enumerate(valid_items, 1):
         row = item["row"]
         title = item["title"]
         name = item["name"]
+        upload_progress("payload", index, len(valid_items), title + " / " + name)
         child_rows = item["child_rows"]
         ms_keg_id = item["ms_keg_id"]
         ms_keg_item = item["ms_keg_item"]
         ms_keg_source = item["ms_keg_source"]
         ms_keg = ms_keg_item or client.get_ms_keg(ms_keg_id)
         if not ms_keg:
+            upload_progress("item", index, len(valid_items), title + " / " + name, "failed", "MS-Kegiatan tidak bisa diakses")
             print(f"[error] {title} / {name}: MS-Kegiatan {ms_keg_id} tidak bisa diakses.")
             continue
         if ms_keg_source == "auto":
@@ -157,6 +169,7 @@ def main() -> None:
         kegiatan_map_rows.append(
             {
                 "judul_kegiatan": title,
+                "submission_period": ms_keg.get("submission_period") or ms_keg.get("submissionPeriod"),
                 "ms_keg_id": ms_keg_id,
                 "detail_url": f"https://indah.bps.go.id/metadata/view-kegiatan/{ms_keg_id}",
                 "status": ms_keg.get("status") or "",
@@ -171,16 +184,16 @@ def main() -> None:
         if args.verbose:
             print_dry_run_payload("variabel-payload", payload, True)
         if existing_ms_var_id:
-            result = client.update_variabel(existing_ms_var_id, payload)
-            if is_error_result(result):
-                print(f"[error] {title} / {name}: {result}")
-                continue
+            upload_progress("upload", index, len(valid_items), title + " / " + name)
+            result = retry_api_result(lambda: client.update_variabel(existing_ms_var_id, payload), f"variabel {title} / {name}")
             ms_var_id = existing_ms_var_id
             action = "disubmit ulang" if target_status == "REVISED" else "disubmit" if args.final_submit else "diperbarui"
             print(f"[ok] variabel {action}: {title} / {name} -> {ms_var_id}")
+            upload_progress("item", index, len(valid_items), title + " / " + name, "success")
             map_rows.append(
                 {
                     "judul_kegiatan": title,
+                    "submission_period": payload["submission_period"],
                     "ms_keg_id": ms_keg_id,
                     "nama_variabel": name,
                     "ms_var_id": ms_var_id,
@@ -189,19 +202,20 @@ def main() -> None:
             )
             continue
 
-        result = client.create_variabel(payload)
-        if is_error_result(result):
-            print(f"[error] {title} / {name}: {result}")
-            continue
+        upload_progress("upload", index, len(valid_items), title + " / " + name)
+        result = retry_api_result(lambda: client.create_variabel(payload), f"variabel {title} / {name}")
         ms_var_id = extract_created_id(result)
         if not ms_var_id:
+            upload_progress("item", index, len(valid_items), title + " / " + name, "failed", "API tidak mengembalikan id variabel")
             print(f"[error] {title} / {name}: API tidak mengembalikan id variabel. Respons: {result}")
             continue
         action = "tersubmit" if args.final_submit else "tersimpan"
         print(f"[ok] variabel {action}: {title} / {name} -> {ms_var_id}")
+        upload_progress("item", index, len(valid_items), title + " / " + name, "success")
         map_rows.append(
             {
                 "judul_kegiatan": title,
+                "submission_period": payload["submission_period"],
                 "ms_keg_id": ms_keg_id,
                 "nama_variabel": name,
                 "ms_var_id": ms_var_id,
@@ -210,10 +224,11 @@ def main() -> None:
         )
 
     if args.submit and kegiatan_map_rows:
+        upload_progress("mapping", len(valid_items), len(valid_items))
         append_or_replace_map(
             kegiatan_map_path,
-            ["judul_kegiatan", "ms_keg_id", "detail_url", "status"],
-            ["judul_kegiatan"],
+            ["judul_kegiatan", "submission_period", "ms_keg_id", "detail_url", "status"],
+            ["judul_kegiatan", "submission_period"],
             kegiatan_map_rows,
         )
         print(f"Map kegiatan ditulis: {kegiatan_map_path}")
@@ -222,7 +237,7 @@ def main() -> None:
         run_state = Path(args.run_state)
         append_or_replace_map(
             run_state / "variabel_map.csv",
-            ["judul_kegiatan", "ms_keg_id", "nama_variabel", "ms_var_id", "status"],
+            ["judul_kegiatan", "submission_period", "ms_keg_id", "nama_variabel", "ms_var_id", "status"],
             ["judul_kegiatan", "ms_keg_id", "nama_variabel"],
             map_rows,
         )

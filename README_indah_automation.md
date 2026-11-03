@@ -2,9 +2,15 @@
 
 Automation tersedia lewat UI lokal dan script phase terpisah.
 
-## Login Manual
+## Login dari UI Web
 
-scp ".indah_session/storage_state.json" user@homeserver:/path/ke/metadataindah-uploads/.indah_session/storage_state.json
+Buka UI, klik **Login INDAH**, lalu masukkan akun INDAH dan kode captcha yang
+ditampilkan. Captcha dibuat serta diperiksa di browser, mengikuti perilaku UI
+resmi INDAH. Password hanya diteruskan ke API resmi INDAH dan tidak disimpan.
+
+Setiap browser mendapat file session terpisah di `.indah_session/ui_sessions/`,
+sehingga proses upload dan cleanup memakai akun browser tersebut dan tidak
+berbagi session global dengan pengguna lain.
 
 ## UI Lokal
 
@@ -44,7 +50,7 @@ Compose akan mount folder project ke `/app`, jadi file berikut tetap tersimpan d
 - `ui_runs/`
 - `dispora/`
 
-Catatan login: login manual dengan browser lebih aman dijalankan dari host seperti biasa:
+Login Playwright manual tetap tersedia sebagai fallback dari terminal host:
 
 ```bash
 ../venv/bin/python indah_login.py
@@ -57,6 +63,11 @@ Setiap phase menerima:
 - file satuan `.csv`, `.tsv`, `.xlsx`, atau `.xlsm`
 - workbook gabungan dengan nama sheet sesuai template, misalnya `ms_kegiatan`
 - URL spreadsheet yang bisa diakses publik/diekspor
+
+Pada UI, pilih **Periode Tahun** sebelum menyimpan draft atau submit langsung.
+Pilihan ini dikirim sebagai `submission_period` API dan tidak mengubah kolom
+`tahun` di dalam file. MS-Variabel dan MS-Indikator hanya akan memakai
+MS-Kegiatan induk pada periode yang sama.
 
 Input wajib per phase:
 

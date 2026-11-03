@@ -146,7 +146,7 @@ def cleanup_phase_by_kegiatan(
         ms_keg_id = target["id"]
         title = clean(target.get("title")) or "-"
         status = clean(target.get("status")) or ""
-        if not allow_non_draft and status not in {"DRAFT", "CORRECTION_REQUIRED", ""}:
+        if not allow_non_draft and status not in {"DRAFT", "CORRECTION_REQUIRED", "SUBMITTED", ""}:
             print(f"[skip] {phase}: kegiatan {title} ({ms_keg_id}) status {status}; tidak dihapus tanpa --allow-non-draft")
             continue
         children = children_for_target(client, target, phase)

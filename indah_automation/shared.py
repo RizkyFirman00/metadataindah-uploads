@@ -24,6 +24,17 @@ class IndahError(RuntimeError):
     pass
 
 
+class IndahHTTPError(IndahError):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def upload_progress(stage: str, current: int, total: int, title: str = "", outcome: str = "", message: str = "") -> None:
+    print("INDAH_PROGRESS " + json.dumps({"stage": stage, "current": current, "total": total,
+          "title": title, "outcome": outcome, "message": message}, ensure_ascii=False), flush=True)
+
+
 @dataclass
 class SessionAuth:
     token: str
@@ -395,7 +406,7 @@ class IndahClient:
         self.base_url = base_url.rstrip("/")
         self.context = ssl._create_unverified_context()
 
-    def request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, *, retry_server_errors: bool = True) -> Dict[str, Any]:
         url = self.base_url + path
         if params:
             query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None}, doseq=True)
@@ -409,13 +420,22 @@ class IndahClient:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
-        try:
-            with urllib.request.urlopen(request, context=self.context, timeout=120) as response:
-                text = response.read().decode("utf-8")
-                return json.loads(text) if text else {}
-        except urllib.error.HTTPError as exc:
-            text = exc.read().decode("utf-8", errors="replace")
-            raise IndahError(f"HTTP {exc.code} {method.upper()} {path}: {text}") from exc
+        retryable = {500, 502, 503, 504}
+        max_attempts = 3 if retry_server_errors else 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with urllib.request.urlopen(request, context=self.context, timeout=120) as response:
+                    text = response.read().decode("utf-8")
+                    return json.loads(text) if text else {}
+            except urllib.error.HTTPError as exc:
+                text = exc.read().decode("utf-8", errors="replace")
+                if exc.code in retryable and attempt < max_attempts:
+                    wait = 2 ** attempt
+                    print(f"[retry {attempt}/{max_attempts - 1}] HTTP {exc.code} {method.upper()} {path} — coba lagi dalam {wait}s")
+                    time.sleep(wait)
+                    continue
+                raise IndahHTTPError(exc.code, f"HTTP {exc.code} {method.upper()} {path}: {text}") from exc
+        raise IndahError(f"Gagal setelah {max_attempts} percobaan: {method.upper()} {path}")
 
     def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return self.request("GET", path, params=params)
@@ -464,6 +484,8 @@ class IndahClient:
                     continue
                 for item in page.get("content") or []:
                     if not isinstance(item, dict):
+                        continue
+                    if submission_period and ms_keg_submission_period(item) != as_int(submission_period):
                         continue
                     item_id = item.get("id")
                     if item_id in seen_ids:
@@ -526,8 +548,9 @@ class IndahClient:
     def delete_variabel(self, ms_var_id: Any) -> Dict[str, Any]:
         return self.delete(f"/sdi/v2/metadata-statistik/variabel/{ms_var_id}")
 
-    def create_indikator(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return first_result(self.post("/sdi/v2/metadata-statistik/indikator", payload))
+    def create_indikator(self, payload: Dict[str, Any], *, retry_server_errors: bool = True) -> Dict[str, Any]:
+        return first_result(self.request("POST", "/sdi/v2/metadata-statistik/indikator", payload=payload,
+                                         retry_server_errors=retry_server_errors))
 
     def update_indikator(self, ms_ind_id: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self.put(f"/sdi/v2/metadata-statistik/indikator/{ms_ind_id}", payload)
@@ -582,6 +605,18 @@ def direct_submit_status(current_status: Any = None) -> str:
 def is_error_result(item: Dict[str, Any]) -> bool:
     status = item.get("status")
     return isinstance(status, int) and status >= 400
+
+
+def retry_api_result(operation, label: str) -> Dict[str, Any]:
+    attempt = 1
+    while True:
+        result = operation()
+        if not is_error_result(result):
+            return result
+        wait = min(60, 2 ** min(attempt, 6))
+        print(f"[retry {attempt}] {label}: {result} — coba lagi dalam {wait}s")
+        time.sleep(wait)
+        attempt += 1
 
 
 def extract_created_id(item: Dict[str, Any]) -> Any:
@@ -716,10 +751,12 @@ def parent_refs_from_ms_keg(ms_keg: Dict[str, Any], user: Dict[str, Any]) -> Dic
     }
 
 
-def map_rows_by_title(path: Path) -> Dict[str, Dict[str, str]]:
+def map_rows_by_title(path: Path, submission_period: Optional[int] = None) -> Dict[str, Dict[str, str]]:
     rows = read_csv_rows(path)
     mapped: Dict[str, Dict[str, str]] = {}
     for row in rows:
+        if submission_period is not None and as_int(pick(row, "submission_period")) != submission_period:
+            continue
         title = pick(row, "judul_kegiatan")
         if title:
             mapped[title] = row
@@ -740,6 +777,10 @@ def row_submission_period(row: Dict[str, str]) -> int:
     return as_int(pick(row, "submission_period", "submissionPeriod", "periode_pelaporan", "tahun")) or now_year()
 
 
+def ms_keg_submission_period(item: Dict[str, Any]) -> Optional[int]:
+    return as_int(item.get("submission_period") or item.get("submissionPeriod"))
+
+
 def is_ms_keg_item(item: Any) -> bool:
     return isinstance(item, dict) and item.get("id") is not None
 
@@ -749,10 +790,13 @@ def resolve_ms_keg_reference(
     kegiatan_map: Dict[str, Dict[str, str]],
     client: Optional[IndahClient] = None,
     *,
+    submission_period: Optional[int] = None,
     auto_resolve: bool = True,
     max_scan_pages: int = 2,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]], str]:
+    wanted_period = submission_period or row_submission_period(row)
     direct = resolve_ms_keg_id(row, kegiatan_map)
+    direct_period_mismatch = False
     if direct:
         if client is None:
             return direct, None, "direct"
@@ -761,18 +805,22 @@ def resolve_ms_keg_reference(
         except IndahError:
             item = None
         if is_ms_keg_item(item):
-            return str(item.get("id")), item, "direct"
+            if ms_keg_submission_period(item) == wanted_period:
+                return str(item.get("id")), item, "direct"
+            direct_period_mismatch = True
 
     title = pick(row, "judul_kegiatan")
     if auto_resolve and client is not None and title:
         item = client.find_ms_keg_by_title(
             title,
-            submission_period=row_submission_period(row),
+            submission_period=wanted_period,
             max_scan_pages=max_scan_pages,
         )
         if is_ms_keg_item(item):
             return str(item.get("id")), item, "auto"
 
+    if direct_period_mismatch:
+        return None, None, "period-mismatch"
     if direct:
         return direct, None, "stale"
     return None, None, "missing"
