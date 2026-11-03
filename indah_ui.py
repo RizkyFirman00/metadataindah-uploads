@@ -244,6 +244,7 @@ ICON_MOON = '<svg class="icon-moon" aria-hidden="true" width="18" height="18" vi
 ICON_SUN = '<svg class="icon-sun" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
 ICON_CLOSE = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
 ICON_EYE = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>'
+ICON_EYE_OFF = '<svg class="icon-eye-off" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7c2 0 3.7.6 5.1 1.5M22 12s-3.5 7-10 7c-2 0-3.7-.6-5.1-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/></svg>'
 ICON_WARN = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg>'
 ICON_CHECK = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>'
 
@@ -318,7 +319,9 @@ document.addEventListener("DOMContentLoaded", function () {
     cancelLink.addEventListener("click", function () { setLinkMode(false); });
 
     function showFile() {
-      fileName.textContent = fileInput.files.length ? "File dipilih: " + fileInput.files[0].name : "";
+      var has = fileInput.files.length > 0;
+      fileName.textContent = has ? fileInput.files[0].name : "Belum ada file dipilih";
+      fileName.classList.toggle("has-file", has);
     }
     fileInput.addEventListener("change", showFile);
     ["dragenter", "dragover"].forEach(function (name) {
@@ -497,7 +500,8 @@ def page(title: str, body: str) -> str:
       {theme_button}
       <form method="post" action="/keluar"><button class="btn btn-secondary btn-sm" type="submit">Keluar</button></form>"""
     else:
-        account = f'{theme_button}<a class="btn btn-secondary btn-sm" href="/login">Masuk</a>'
+        login_button = "" if title == "Masuk" else '<a class="btn btn-secondary btn-sm" href="/login">Masuk</a>'
+        account = f"{theme_button}{login_button}"
     return f"""<!doctype html>
 <html lang="id">
 <head>
@@ -590,9 +594,9 @@ def render_phase_form(phase: str, config: Dict[str, object]) -> str:
       <span class="drop-icon">{ICON_UPLOAD}</span>
       <strong>Tarik file Excel ke sini, atau klik untuk memilih</strong>
       <span class="small muted">Format .xlsx atau .xlsm, maksimal 25 MB</span>
-      <input id="workbook" type="file" name="workbook_file" accept=".xlsx,.xlsm">
+      <input id="workbook" class="sr-only" type="file" name="workbook_file" accept=".xlsx,.xlsm">
+      <span class="file-pick"><span class="btn btn-secondary btn-sm" aria-hidden="true">Pilih file</span><span id="file-name" class="file-name" aria-live="polite">Belum ada file dipilih</span></span>
     </label>
-    <span id="file-name" class="small muted" aria-live="polite"></span>
     <button type="button" id="use-link" class="link-btn">Atau pakai link Google Sheets</button>
     <div id="link-box" class="field" hidden>
       <label for="sheet-url">Link Google Sheets</label>
@@ -715,7 +719,7 @@ def render_login_form(state_path: Path, error: str = "") -> str:
       <label for="login-password">Password</label>
       <div class="input-row">
         <input id="login-password" class="input" type="password" name="password" autocomplete="current-password" required>
-        <button id="toggle-password" class="btn btn-secondary btn-icon" type="button" aria-pressed="false" aria-label="Lihat password">{ICON_EYE}</button>
+        <button id="toggle-password" class="btn btn-secondary btn-icon eye-toggle" type="button" aria-pressed="false" aria-label="Lihat password">{ICON_EYE}{ICON_EYE_OFF}</button>
       </div>
     </div>
     <button class="btn btn-primary" type="submit" data-busy="Masuk ke INDAH...">Masuk</button>
@@ -1353,7 +1357,7 @@ def fmt_clock(timestamp: Optional[float], with_date: bool = False) -> str:
     if not timestamp:
         return "-"
     moment = datetime.fromtimestamp(timestamp, WIB)
-    return moment.strftime("%d %b, %H.%M.%S WIB" if with_date else "%H.%M.%S")
+    return f"{moment.day} {moment.strftime('%b, %H.%M')}" if with_date else moment.strftime("%H.%M.%S")
 
 
 def read_timeline(run_dir: Path) -> List[tuple]:
@@ -1463,7 +1467,7 @@ def run_details(run_dir: Path, stdout: str, summary: Dict[str, object], done: bo
         "elapsed_text": fmt_duration(elapsed),
         "avg_text": (fmt_duration(average) + " / data") if average is not None else "-",
         "eta_text": (fmt_duration(eta) if eta is not None else ("Menghitung..." if not done else "-")),
-        "finish_text": fmt_clock(now + eta) if eta is not None else ("-" if not done else fmt_clock(finished)),
+        "finish_text": (fmt_clock(now + eta, with_date=True) if eta is not None else ("-" if not done else fmt_clock(finished, with_date=True))),
         "started_text": fmt_clock(started, with_date=True),
         "finished_text": fmt_clock(finished, with_date=True) if done else "-",
         "retry": retry,
@@ -1496,10 +1500,11 @@ def render_items_table(items: List[Dict[str, object]]) -> str:
   <div class="section">
     <div class="section-head">
       <h2 class="step">Rincian per data</h2>
-      <label class="check small"><input type="checkbox" id="only-problems"> Hanya yang bermasalah (<span id="problem-count">{problems}</span>)</label>
+      <label class="check small"><input type="checkbox" id="only-problems"><span>Hanya yang bermasalah (<span id="problem-count">{problems}</span>)</span></label>
     </div>
     <div class="table-wrap">
       <table class="items" id="items">
+        <colgroup><col class="c-num"><col class="c-data"><col class="c-status"><col class="c-msg"><col class="c-time"></colgroup>
         <thead><tr><th>No</th><th>Data</th><th>Status</th><th>Keterangan</th><th>Waktu</th></tr></thead>
         <tbody>{render_items_rows(items)}</tbody>
       </table>
@@ -1647,7 +1652,7 @@ def render_run_result(
   <div class="section">
     {warning}
     {notice("error", escape(details["aborted"])) if details and details.get("aborted") else ""}
-    <details{" open" if problems or status == "Terhenti" else ""}>
+    <details{" open" if (problems or status == "Terhenti") and not (details and details.get("items")) else ""}>
       <summary>Kesimpulan</summary>
       <pre class="log">{escape(result['output'])}</pre>
     </details>
